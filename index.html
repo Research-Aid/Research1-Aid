@@ -3274,7 +3274,14 @@ async function loadExpertApplications() {
   try {
     // Index-free broad fetch so no record gets hidden due indexing/rules edge cases
     const all = await db.collection('expertApplications').limit(1000).get();
-    let docs = all.docs.map(d => ({ id: d.id, record: normalizeExpertRecord(d.data(), d.id) }));
+    let docs = all.docs.map(d => ({ id: d.id, record: normalizeExpertRecord(d.data(), d.id), source: 'firestore' }));
+    if (!docs.length) {
+      const sheetRows = await loadExpertApplicationsFromSheet();
+      docs = sheetRows.map((row, i) => {
+        const id = row.applicationId || ('sheet-' + i + '-' + Date.now());
+        return { id, record: normalizeExpertRecord(row, id), source: 'sheet' };
+      });
+    }
     if (filter) docs = docs.filter(d => d.record.status === filter);
     docs = docs.sort((a, b) => (b.record.timestamp?.seconds || 0) - (a.record.timestamp?.seconds || 0));
 
@@ -3283,13 +3290,16 @@ async function loadExpertApplications() {
       return;
     }
 
-    list.innerHTML = docs.map(({ id, record: d }) => {
+    list.innerHTML = docs.map(({ id, record: d, source }) => {
       const status = d.status;
       const chip = String(status).toLowerCase().replace(/\s+/g, '-');
       const ts = d.timestamp?.seconds
         ? new Date(d.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })
         : '—';
       const displayName = d.fullName;
+      const sourcePill = source === 'sheet'
+        ? '<span style="font-size:.72rem;padding:2px 7px;border-radius:999px;background:#ffedd5;color:#9a3412;font-weight:700">Sheet Backup</span>'
+        : '';
       return `<div class="admin-order-row">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
           <div>
@@ -3297,7 +3307,10 @@ async function loadExpertApplications() {
             <div class="ao-name">${displayName}</div>
             <div class="ao-svc">${d.branch} • ${d.qualification} • ⭐ ${d.avgRating || '0.0'} (${d.totalRatings || 0})</div>
           </div>
-          <span class="expert-status-chip ${chip}">${status}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            ${sourcePill}
+            <span class="expert-status-chip ${chip}">${status}</span>
+          </div>
         </div>
         <div class="ao-meta">
           <span>📧 ${d.email}</span>
@@ -3312,10 +3325,10 @@ async function loadExpertApplications() {
         <div style="font-size:.8rem;color:var(--muted);margin-top:6px"><strong>Subjects:</strong> ${d.subjects}</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
           <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Update Status:</label>
-          <select class="admin-status-select" onchange="updateExpertStatus('${id}', this.value, this)">
+          <select class="admin-status-select" onchange="updateExpertStatus('${id}', this.value, this)" ${source==='sheet' ? 'disabled title="Sheet backup mode: update Firestore to enable status changes"' : ''}>
             ${['Applied', 'Shortlisted', 'Qualified', 'Not Qualified'].map(s => `<option value="${s}" ${status===s?'selected':''}>${s}</option>`).join('')}
           </select>
-          <input type="text" placeholder="Admin note" value="${(d.adminNote || '').replace(/"/g, '&quot;')}" onblur="updateExpertNote('${id}', this.value)" style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.8rem" />
+          <input type="text" placeholder="Admin note" value="${(d.adminNote || '').replace(/"/g, '&quot;')}" onblur="updateExpertNote('${id}', this.value)" ${source==='sheet' ? 'disabled title="Sheet backup mode: update Firestore to enable note saves"' : ''} style="flex:1;min-width:180px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.8rem" />
         </div>
       </div>`;
     }).join('');
@@ -3325,6 +3338,18 @@ async function loadExpertApplications() {
       <p style="font-size:.82rem;color:var(--muted);margin-top:6px">Error: ${err.message}</p>
       <p style="font-size:.82rem;color:var(--muted);margin-top:6px">If applications are saved in Sheet but not here, update Firestore Rules to allow authenticated reads/writes for <code>expertApplications</code>.</p>
     </div>`;
+  }
+}
+
+async function loadExpertApplicationsFromSheet() {
+  try {
+    const res = await fetch(SHEET_URL + '?action=listExpertApplications');
+    if (!res.ok) return [];
+    const json = await res.json();
+    if (json?.status !== 'success' || !Array.isArray(json.data)) return [];
+    return json.data;
+  } catch (_) {
+    return [];
   }
 }
 

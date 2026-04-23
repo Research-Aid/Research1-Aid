@@ -7,6 +7,68 @@
 var DRIVE_FOLDER_NAME = 'ResrchAid Orders';
 var APP_VERSION = 'RA-2026-04-21-1';
 
+function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : '';
+  if (action === 'listExpertApplications') {
+    return listExpertApplications();
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify({ status: 'ok', version: APP_VERSION }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function listExpertApplications() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('EXPERT_APPLICATION');
+    if (!sheet || sheet.getLastRow() < 2) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ status: 'success', version: APP_VERSION, data: [] }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var values = sheet.getDataRange().getValues();
+    var rows = [];
+    for (var i = 1; i < values.length; i++) {
+      var r = values[i];
+      rows.push({
+        timestamp:            r[0] || '',
+        applicationId:        r[1] || '',
+        fullName:             r[2] || '',
+        name:                 r[2] || '',
+        email:                r[3] || '',
+        phone:                r[4] || '',
+        cityState:            r[5] || '',
+        qualification:        r[6] || '',
+        experienceYears:      r[7] || '',
+        branch:               r[8] || '',
+        availability:         r[9] || '',
+        subjects:             r[10] || '',
+        tools:                r[11] || '',
+        academicProfile:      r[12] || '',
+        statement:            r[13] || '',
+        linkedin:             r[14] || '',
+        portfolio:            r[15] || '',
+        resumeUrl:            r[16] || '',
+        photoUrl:             r[17] || '',
+        signatureUrl:         r[18] || '',
+        instituteIdUrl:       r[19] || '',
+        qualificationDocUrl:  r[20] || '',
+        status:               r[21] || 'Applied',
+        adminNote:            r[22] || ''
+      });
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'success', version: APP_VERSION, data: rows }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: 'error', message: String(err), version: APP_VERSION }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
 function safeJsonParse(raw) {
   if (!raw) return {};
   try { return JSON.parse(raw); } catch (e1) {}
