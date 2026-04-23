@@ -134,10 +134,18 @@ function doPost(e) {
 
   else if (type === 'EXPERT_APPLICATION') {
     var eRow = sheet.getLastRow() + 1;
+    var fullName = data.fullName || data.name || '';
+    var subjects = data.subjects || data.specialization || '';
+    var resumeUrl = data.resumeUrl || '';
+    var photoUrl = data.photoUrl || '';
+    var signatureUrl = data.signatureUrl || '';
+    var instituteIdUrl = data.instituteIdUrl || '';
+    var qualificationDocUrl = data.qualificationDocUrl || '';
+
     sheet.appendRow([
       now,
       data.applicationId      || '',
-      data.fullName           || '',
+      fullName,
       data.email              || '',
       data.phone              || '',
       data.cityState          || '',
@@ -145,17 +153,17 @@ function doPost(e) {
       data.experienceYears    || '',
       data.branch             || '',
       data.availability       || '',
-      data.subjects           || '',
+      subjects,
       data.tools              || '',
       data.academicProfile    || '',
       data.statement          || '',
       data.linkedin           || '',
       data.portfolio          || '',
-      data.resumeUrl          || '',
-      data.photoUrl           || '',
-      data.signatureUrl       || '',
-      data.instituteIdUrl     || '',
-      data.qualificationDocUrl|| '',
+      resumeUrl,
+      photoUrl,
+      signatureUrl,
+      instituteIdUrl,
+      qualificationDocUrl,
       data.status             || 'Applied',
       data.adminNote          || ''
     ]);

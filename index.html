@@ -2275,23 +2275,28 @@
     } catch (_) {}
 
     let firestoreSaved = false;
+    let firestoreErrMsg = '';
     if (typeof db !== 'undefined') {
       try {
+        const finalUser = await waitForAuthUser(6000);
+        const finalUid = finalUser?.uid || auth?.currentUser?.uid || '';
+        if (!finalUid) throw new Error('Authentication not ready. Please login again and retry.');
         await db.collection('expertApplications').doc(applicationId).set({
           ...payload,
-          uid: auth?.currentUser?.uid || '',
+          uid: finalUid,
           timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
         firestoreSaved = true;
       } catch (e) {
         console.error('expertApplications save failed:', e);
+        firestoreErrMsg = friendlyAuthError(e.code) || e.message || 'Unknown Firestore error';
       }
     }
 
     if (firestoreSaved) {
       showToast('Application submitted successfully! It is visible in admin expert panel.', '✅', 5200);
     } else if (sheetSaved) {
-      showToast('Application saved to backup only. Firestore save failed, admin panel may not show it.', '⚠️', 6000);
+      showToast('Saved to Drive/Sheet only. Firebase failed: ' + firestoreErrMsg, '⚠️', 7000);
     } else {
       showToast('Submission failed. Please retry after login.', '❌', 5200);
       btn.disabled = false;
@@ -2803,6 +2808,23 @@ function friendlyAuthError(code) {
     'auth/popup-closed-by-user': 'Sign-in popup was closed.',
   };
   return map[code] || 'Something went wrong. Please try again.';
+}
+
+async function waitForAuthUser(timeoutMs = 5000) {
+  if (auth.currentUser) return auth.currentUser;
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      unsub();
+      resolve(auth.currentUser || null);
+    }, timeoutMs);
+    const unsub = auth.onAuthStateChanged(u => {
+      if (u) {
+        clearTimeout(timer);
+        unsub();
+        resolve(u);
+      }
+    });
+  });
 }
 
 function normText(v, fallback = 'Not provided') {
