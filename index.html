@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -947,7 +947,7 @@
 
 <!-- Legal Banner -->
 <div class="legal-banner">
-  ⚠️ <strong>Disclaimer:</strong> Research Aid and Co provides academic assistance, guidance, and reference material only. All services are meant for learning and reference purposes. Scholars are responsible for how they use the material. We do not promote academic dishonesty.
+  ⚠️ <strong>Legal Disclaimer:</strong> Research Aid and Co provides academic assistance, guidance, editing support, and reference material only. We do not sell degrees, marks, or guaranteed outcomes. Final submission decisions, originality compliance, institutional policy compliance, and all usage responsibility remain solely with the client/scholar. By using this website, you agree that services are advisory/reference in nature, timelines are best-effort, and Research Aid and Co is not liable for institutional penalties, rejection outcomes, or indirect/consequential loss arising from misuse of provided material.
 </div>
 
 <!-- Services -->
@@ -2268,19 +2268,37 @@
       ...fileUrls
     };
 
+    let sheetSaved = false;
     try {
       await fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) });
+      sheetSaved = true;
     } catch (_) {}
 
+    let firestoreSaved = false;
     if (typeof db !== 'undefined') {
-      db.collection('expertApplications').doc(applicationId).set({
-        ...payload,
-        uid: auth?.currentUser?.uid || '',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(() => {});
+      try {
+        await db.collection('expertApplications').doc(applicationId).set({
+          ...payload,
+          uid: auth?.currentUser?.uid || '',
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        firestoreSaved = true;
+      } catch (e) {
+        console.error('expertApplications save failed:', e);
+      }
     }
 
-    showToast('Application submitted successfully! We will contact you after screening.', '✅', 5200);
+    if (firestoreSaved) {
+      showToast('Application submitted successfully! It is visible in admin expert panel.', '✅', 5200);
+    } else if (sheetSaved) {
+      showToast('Application saved to backup only. Firestore save failed, admin panel may not show it.', '⚠️', 6000);
+    } else {
+      showToast('Submission failed. Please retry after login.', '❌', 5200);
+      btn.disabled = false;
+      btn.textContent = '📩 Submit Expert Application';
+      return;
+    }
+
     e.target.reset();
     btn.disabled = false;
     btn.textContent = '📩 Submit Expert Application';
@@ -3232,7 +3250,8 @@ async function loadExpertApplications() {
   list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading…</p>';
 
   try {
-    const all = await db.collection('expertApplications').limit(400).get();
+    // Index-free broad fetch so no record gets hidden due indexing/rules edge cases
+    const all = await db.collection('expertApplications').limit(1000).get();
     let docs = all.docs.map(d => ({ id: d.id, record: normalizeExpertRecord(d.data(), d.id) }));
     if (filter) docs = docs.filter(d => d.record.status === filter);
     docs = docs.sort((a, b) => (b.record.timestamp?.seconds || 0) - (a.record.timestamp?.seconds || 0));
@@ -3279,7 +3298,11 @@ async function loadExpertApplications() {
       </div>`;
     }).join('');
   } catch (err) {
-    list.innerHTML = `<p style="color:var(--danger);padding:14px">⚠️ Could not load expert applications. ${err.message}</p>`;
+    list.innerHTML = `<div style="padding:14px">
+      <p style="color:var(--danger);font-weight:700">⚠️ Could not load expert applications.</p>
+      <p style="font-size:.82rem;color:var(--muted);margin-top:6px">Error: ${err.message}</p>
+      <p style="font-size:.82rem;color:var(--muted);margin-top:6px">If applications are saved in Sheet but not here, update Firestore Rules to allow authenticated reads/writes for <code>expertApplications</code>.</p>
+    </div>`;
   }
 }
 
