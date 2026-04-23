@@ -2843,15 +2843,50 @@ function normalizeExpertRecord(d, id = '') {
     name: normText(d?.name || fullName, fullName),
     email: normText(email, 'Not provided'),
     phone: normText(d?.phone, 'Not provided'),
+    cityState: normText(d?.cityState, 'Not provided'),
     branch: normText(d?.branch, 'General'),
     qualification: normText(d?.qualification, 'Not provided'),
+    experienceYears: normText(d?.experienceYears, 'Not provided'),
     subjects: normText(d?.subjects || d?.specialization, 'Not provided'),
     availability: normText(d?.availability, 'Project Basis'),
+    tools: normText(d?.tools, 'Not provided'),
+    academicProfile: normText(d?.academicProfile, 'Not provided'),
+    statement: normText(d?.statement, 'Not provided'),
+    linkedin: normText(d?.linkedin, ''),
+    portfolio: normText(d?.portfolio, ''),
     status: normText(d?.status, 'Applied'),
     applicationId: normText(d?.applicationId, id || 'N/A'),
     avgRating: Number(d?.avgRating || 0),
     totalRatings: Number(d?.totalRatings || 0)
   };
+}
+
+function isMeaningful(v) {
+  if (v === null || v === undefined) return false;
+  const t = String(v).trim();
+  return !!t && t !== 'Not provided' && t !== 'N/A' && t !== 'Unnamed Expert';
+}
+
+function expertMergeKey(r, fallback = '') {
+  return String(r?.applicationId || r?.id || r?.email || fallback || '').trim().toUpperCase();
+}
+
+function mergeExpertRaw(base, extra) {
+  const merged = { ...base };
+  Object.keys(extra || {}).forEach(k => {
+    if (!isMeaningful(merged[k]) && isMeaningful(extra[k])) merged[k] = extra[k];
+    if (k === 'timestamp' && !merged.timestamp && extra.timestamp) merged.timestamp = extra.timestamp;
+  });
+  return merged;
+}
+
+function expertSortValue(rec) {
+  const t = rec?.timestamp;
+  if (!t) return 0;
+  if (typeof t?.seconds === 'number') return t.seconds * 1000;
+  if (t instanceof Date) return t.getTime();
+  const p = Date.parse(String(t));
+  return Number.isNaN(p) ? 0 : p;
 }
 
 function normalizeOrderRecord(o, id = '') {
@@ -3272,18 +3307,44 @@ async function loadExpertApplications() {
   list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading…</p>';
 
   try {
-    // Index-free broad fetch so no record gets hidden due indexing/rules edge cases
-    const all = await db.collection('expertApplications').limit(1000).get();
-    let docs = all.docs.map(d => ({ id: d.id, record: normalizeExpertRecord(d.data(), d.id), source: 'firestore' }));
-    if (!docs.length) {
-      const sheetRows = await loadExpertApplicationsFromSheet();
-      docs = sheetRows.map((row, i) => {
-        const id = row.applicationId || ('sheet-' + i + '-' + Date.now());
-        return { id, record: normalizeExpertRecord(row, id), source: 'sheet' };
-      });
+    // Load both Firestore and sheet backup, then merge by application id/email key.
+    let firestoreDocs = [];
+    let firestoreErr = null;
+    try {
+      const all = await db.collection('expertApplications').limit(1000).get();
+      firestoreDocs = all.docs.map(d => ({ ...d.data(), id: d.id, __source: 'firestore' }));
+    } catch (e) {
+      firestoreErr = e;
     }
+
+    const sheetRows = await loadExpertApplicationsFromSheet();
+    const sheetDocs = sheetRows.map((r, i) => ({ ...r, id: r.applicationId || ('sheet-' + i), __source: 'sheet' }));
+
+    const mergedByKey = new Map();
+    sheetDocs.forEach((r, i) => {
+      const key = expertMergeKey(r, 'SHEET-' + i);
+      mergedByKey.set(key, r);
+    });
+    firestoreDocs.forEach((r, i) => {
+      const key = expertMergeKey(r, 'FS-' + i);
+      const existing = mergedByKey.get(key);
+      if (existing) {
+        const merged = mergeExpertRaw(r, existing);
+        merged.__source = 'firestore+sheet';
+        mergedByKey.set(key, merged);
+      } else {
+        mergedByKey.set(key, r);
+      }
+    });
+
+    let docs = Array.from(mergedByKey.values()).map((raw, i) => {
+      const id = raw.id || raw.applicationId || ('expert-' + i);
+      return { id, record: normalizeExpertRecord(raw, id), source: raw.__source || 'sheet' };
+    });
+
+    if (!docs.length && firestoreErr) throw firestoreErr;
     if (filter) docs = docs.filter(d => d.record.status === filter);
-    docs = docs.sort((a, b) => (b.record.timestamp?.seconds || 0) - (a.record.timestamp?.seconds || 0));
+    docs = docs.sort((a, b) => expertSortValue(b.record) - expertSortValue(a.record));
 
     if (!docs.length) {
       list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">No expert applications found.</p>';
@@ -3299,7 +3360,9 @@ async function loadExpertApplications() {
       const displayName = d.fullName;
       const sourcePill = source === 'sheet'
         ? '<span style="font-size:.72rem;padding:2px 7px;border-radius:999px;background:#ffedd5;color:#9a3412;font-weight:700">Sheet Backup</span>'
-        : '';
+        : (source === 'firestore+sheet'
+          ? '<span style="font-size:.72rem;padding:2px 7px;border-radius:999px;background:#dcfce7;color:#166534;font-weight:700">Firestore + Sheet</span>'
+          : '');
       return `<div class="admin-order-row">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
           <div>
@@ -3315,6 +3378,7 @@ async function loadExpertApplications() {
         <div class="ao-meta">
           <span>📧 ${d.email}</span>
           <span>📱 ${d.phone}</span>
+          <span>📍 ${d.cityState}</span>
           <span>🗓 ${ts}</span>
           ${d.resumeUrl ? `<a href="${d.resumeUrl}" target="_blank" style="color:var(--primary);font-weight:700">CV</a>` : ''}
           ${d.photoUrl ? `<a href="${d.photoUrl}" target="_blank" style="color:var(--primary);font-weight:700">Photo</a>` : ''}
@@ -3323,6 +3387,14 @@ async function loadExpertApplications() {
           ${d.qualificationDocUrl ? `<a href="${d.qualificationDocUrl}" target="_blank" style="color:var(--primary);font-weight:700">Degree</a>` : ''}
         </div>
         <div style="font-size:.8rem;color:var(--muted);margin-top:6px"><strong>Subjects:</strong> ${d.subjects}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:4px"><strong>Experience:</strong> ${d.experienceYears} years • <strong>Availability:</strong> ${d.availability}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:4px"><strong>Tools:</strong> ${d.tools}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:4px"><strong>Academic Profile:</strong> ${d.academicProfile}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:4px"><strong>Statement:</strong> ${d.statement}</div>
+        <div style="font-size:.8rem;color:var(--muted);margin-top:4px">
+          ${d.linkedin && d.linkedin !== 'Not provided' ? `<a href="${d.linkedin}" target="_blank" style="color:var(--primary);font-weight:700;margin-right:10px">LinkedIn</a>` : ''}
+          ${d.portfolio && d.portfolio !== 'Not provided' ? `<a href="${d.portfolio}" target="_blank" style="color:var(--primary);font-weight:700">Portfolio</a>` : ''}
+        </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
           <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Update Status:</label>
           <select class="admin-status-select" onchange="updateExpertStatus('${id}', this.value, this)" ${source==='sheet' ? 'disabled title="Sheet backup mode: update Firestore to enable status changes"' : ''}>
