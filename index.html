@@ -1889,6 +1889,30 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <div id="fbStatus" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px;text-align:center;font-size:14px;font-weight:700"></div>
+<div id="fbDebugBox" style="display:none;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 10px;margin:8px;font-size:11px;color:#92400e;word-break:break-all;max-height:120px;overflow-y:auto"></div>
+<script>
+var auth, db, storage, firebaseReady = false;
+try {
+  firebase.initializeApp({
+    apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
+    authDomain:        "research-aid-ff2eb.firebaseapp.com",
+    projectId:         "research-aid-ff2eb",
+    storageBucket:     "research-aid-ff2eb.firebasestorage.app",
+    messagingSenderId: "301229801288",
+    appId:             "1:301229801288:web:fb148d7942d8e901513d7d",
+    measurementId:     "G-E899JK0CVQ"
+  });
+  auth    = firebase.auth();
+  db      = firebase.firestore();
+  storage = firebase.storage();
+  firebaseReady = true;
+  console.log('✅ Firebase init OK');
+} catch(e) {
+  console.error('❌ Firebase init failed:', e);
+  var st = document.getElementById('fbStatus');
+  if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed: ' + e.message; }
+}
+</script>
 <script>
   const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwRtvLwBXRBKT_n7FMrqpF0Hh72v9S4-Z-WaixvtoaQxBFzYfaHXKgblp_1p0VwCAlv/exec';
   emailjs.init('ntjRszAyP7FaoFO1A');
@@ -1983,11 +2007,11 @@
     if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
     
     fbDebug('Login attempt: ' + email);
-    fbDebug('firebaseReady=' + (typeof firebaseReady !== 'undefined' ? firebaseReady : 'N/A') + ' auth=' + typeof auth);
+    fbDebug('firebaseReady=' + firebaseReady + ' auth=' + typeof auth);
     
-    if (typeof firebaseReady === 'undefined' || !firebaseReady || typeof auth === 'undefined') {
+    if (!firebaseReady || !auth) {
       fbDebug('BLOCKED: Firebase not ready');
-      showAuthErr('login', 'Firebase not loaded yet. Press Ctrl+Shift+R to hard-refresh the page.');
+      showAuthErr('login', 'Firebase not loaded. Press Ctrl+Shift+R to hard-refresh.');
       return;
     }
     
@@ -2563,38 +2587,6 @@
     el.style.transition = 'opacity .55s ease, transform .55s ease';
     observer.observe(el);
   });
-
-  // ── FIREBASE INIT (must be here so auth functions work) ──
-  let auth, db, storage;
-  let firebaseReady = false;
-
-  try {
-    if (typeof firebase === 'undefined') throw new Error('Firebase SDK script did not load');
-    if (!firebase.app) throw new Error('firebase.app not available');
-    
-    const firebaseConfig = {
-      apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
-      authDomain:        "research-aid-ff2eb.firebaseapp.com",
-      projectId:         "research-aid-ff2eb",
-      storageBucket:     "research-aid-ff2eb.firebasestorage.app",
-      messagingSenderId: "301229801288",
-      appId:             "1:301229801288:web:fb148d7942d8e901513d7d",
-      measurementId:     "G-E899JK0CVQ"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    auth    = firebase.auth();
-    db      = firebase.firestore();
-    storage = firebase.storage();
-
-    fbDebug('✅ Firebase init OK. auth=' + typeof auth + ' db=' + typeof db);
-    firebaseReady = true;
-  } catch(e) {
-    fbDebug('❌ Firebase INIT FAILED: ' + e.message);
-    console.error('❌ Firebase init failed:', e);
-    const st = document.getElementById('fbStatus');
-    if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Error: ' + e.message; }
-  }
 </script>
 
 <script>
@@ -4046,7 +4038,6 @@ async function updateOrderStatus(docId, newStatus, selectEl) {
 
     <!-- LOGIN -->
     <div class="auth-pane active" id="paneLogin">
-      <div id="fbDebugBox" style="display:none;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#92400e;word-break:break-all;max-height:120px;overflow-y:auto"></div>
       <div class="auth-field"><label>Email Address</label><input type="email" id="loginEmail" placeholder="your@email.com" /></div>
       <div class="auth-field"><label>Password</label><input type="password" id="loginPassword" placeholder="••••••••" /></div>
       <p id="loginErr" class="auth-err"></p>
