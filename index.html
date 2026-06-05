@@ -2485,6 +2485,8 @@ auth.onAuthStateChanged(async user => {
     if (adminTab) { adminTab.style.display = isAdmin ? 'flex' : 'none'; console.log('adminTab display:', adminTab.style.display); }
     if (expertAdminTab) expertAdminTab.style.display = isAdmin ? 'flex' : 'none';
     if (adminChatTab) adminChatTab.style.display = isAdmin ? 'flex' : 'none';
+    const adminFilesTab = document.getElementById('adminFilesTab');
+    if (adminFilesTab) adminFilesTab.style.display = isAdmin ? 'flex' : 'none';
 
     // Auto-fill order forms
     autoFillForms(user, prof);
@@ -2499,6 +2501,8 @@ auth.onAuthStateChanged(async user => {
     if (expertAdminTab) expertAdminTab.style.display = 'none';
     if (expertTab) expertTab.style.display = 'none';
     if (adminChatTab) adminChatTab.style.display = 'none';
+    const adminFilesTab = document.getElementById('adminFilesTab');
+    if (adminFilesTab) adminFilesTab.style.display = 'none';
   }
 });
 
@@ -2787,6 +2791,7 @@ function switchDashTab(tab, el) {
   if (tab === 'admin') loadAdminOrders();
   if (tab === 'adminchat') loadAdminChatInbox();
   if (tab === 'expertsadmin') { loadExpertApplications(); loadWorkingExperts(); }
+  if (tab === 'adminfiles') loadAdminFiles();
 }
 
 async function loadDashOrders(uid) {
@@ -3002,6 +3007,75 @@ async function adminReplyChat(uid, userEmail) {
   }
 }
 
+// ── ALL FILES PANEL ─────────────────────────────
+async function loadAdminFiles() {
+  const list = document.getElementById('adminFilesList');
+  list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Scanning all orders for files...</p>';
+  
+  try {
+    const snap = await db.collection('orders').where('fileLink', '!=', '').limit(500).get();
+    
+    if (snap.empty) {
+      list.innerHTML = `<div style="padding:30px;text-align:center">
+        <div style="font-size:3rem;margin-bottom:12px">📂</div>
+        <p style="color:var(--muted)">No files uploaded yet.</p>
+        <p style="font-size:.82rem;color:var(--muted);margin-top:6px">Files will appear here once customers upload them with their orders.</p>
+      </div>`;
+      return;
+    }
+    
+    const files = [];
+    snap.forEach(doc => {
+      const o = doc.data();
+      if (o.fileLink) {
+        const fileName = o.fileLink.split('/').pop().split('?')[0] || 'Unknown file';
+        files.push({
+          orderId: o.orderId || doc.id,
+          customerName: o.name || 'Unknown',
+          customerEmail: o.email || 'N/A',
+          phone: o.phone || 'N/A',
+          service: o.service || 'N/A',
+          fileLink: o.fileLink,
+          fileName: decodeURIComponent(fileName),
+          amount: o.amountPaid || o.amount_paid || '—',
+          timestamp: o.timestamp?.seconds ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' }) : '—'
+        });
+      }
+    });
+    
+    list.innerHTML = `<p style="text-align:center;padding:8px 12px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:14px">📎 ${files.length} file(s) found from orders</p>` +
+    files.map(f => `
+      <div style="margin-bottom:14px;border:1.5px solid var(--border);border-radius:14px;padding:16px;background:#fff;display:flex;align-items:flex-start;gap:14px;box-shadow:0 2px 8px rgba(0,0,0,0.05)">
+        <div style="font-size:2rem">📄</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.88rem;font-weight:800;color:var(--dark);word-break:break-all">${f.fileName}</div>
+          <div style="font-size:.78rem;color:var(--muted);margin-top:4px">
+            <span style="font-weight:600">📋 ${f.orderId}</span> · 
+            <span>👤 ${f.customerName}</span> · 
+            <span>📧 ${f.customerEmail}</span>
+          </div>
+          <div style="font-size:.75rem;color:var(--muted);margin-top:2px">
+            📱 ${f.phone} · 
+            📚 ${f.service} · 
+            💰 ₹${f.amount} · 
+            🗓 ${f.timestamp}
+          </div>
+        </div>
+        <a href="${f.fileLink}" target="_blank" style="flex-shrink:0;background:var(--primary);color:#fff;padding:10px 18px;border-radius:10px;font-size:.8rem;font-weight:700;text-decoration:none;white-space:nowrap">
+          Open ↗
+        </a>
+      </div>
+    `).join('');
+    
+  } catch(e) {
+    console.error('Failed to load admin files:', e);
+    list.innerHTML = `<div style="padding:20px;text-align:center">
+      <p style="color:var(--danger)">❌ Failed to load files</p>
+      <p style="color:var(--muted);font-size:.82rem;margin-top:6px">${e.message}</p>
+    </div>`;
+  }
+}
+
 // ── TEST ORDER ──────────────────────────────────
 async function createTestOrder() {
   const testId = 'TEST-' + Date.now();
@@ -3109,56 +3183,125 @@ async function loadAdminOrders() {
   list.innerHTML = `<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Showing ${docs.length} orders</p>` + docs.map(doc => {
     const o   = normalizeOrderRecord(doc.data(), doc.id);
     const ts  = o.timestamp?.seconds
-      ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })
+      ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
       : (o.timestamp || '—');
     const cls = statusCls[o.status] || 'pending';
-    return `<div class="admin-order-row">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+    const amount = o.amountPaid || o.amount_paid || '—';
+    const refNo = o.refNo || o.transactionId || '—';
+    const fileLink = o.fileLink || '';
+    const phone = o.phone || '—';
+    const email = o.email || '—';
+    const university = o.university || 'Not specified';
+    const deadline = o.deadline || 'Flexible';
+    const requirements = o.requirements || 'No details provided';
+    const assignedExpert = o.assignedExpertName || 'Not Assigned';
+    const progress = o.progress || 'Not Assigned';
+    const adminMsg = o.adminMessage || '';
+    
+    return `<div class="admin-order-row" style="margin-bottom:20px;border:1.5px solid var(--border);border-radius:16px;padding:20px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,0.06)">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
         <div>
-          <div class="ao-id">${o.orderId || doc.id}</div>
-          <div class="ao-name">${o.name || 'N/A'}</div>
-          <div class="ao-svc">${o.service || 'N/A'}</div>
+          <div style="font-size:1.1rem;font-weight:800;color:var(--dark)">${o.name || 'Unknown Customer'}</div>
+          <div style="font-size:.82rem;color:var(--muted);margin-top:2px">📋 ${o.orderId || doc.id}</div>
+          <div style="font-size:.78rem;color:var(--secondary);margin-top:2px">🗓 ${ts}</div>
         </div>
-        <span class="ao-status ${cls}">${o.status || 'Pending'}</span>
+        <span class="ao-status ${cls}" style="padding:6px 16px;font-size:.9rem;font-weight:700;border-radius:50px">${o.status || 'Pending'}</span>
       </div>
-      <div class="ao-meta">
-        <span>📧 ${o.email || 'N/A'}</span>
-        <span>📱 ${o.phone || 'N/A'}</span>
-        <span>🏫 ${o.university || 'N/A'}</span>
-        <span>📆 Deadline: ${o.deadline || 'N/A'}</span>
-        <span>👩‍🏫 Expert: ${o.assignedExpertName || 'Not Assigned'}</span>
-        <span>📌 Progress: ${o.progress || 'Not Assigned'}</span>
-        <span>₹${o.amountPaid || o.amount_paid || 'N/A'}</span>
-        <span>🗓 ${ts}</span>
-        ${o.fileLink ? `<a href="${o.fileLink}" target="_blank" style="color:var(--primary);font-weight:700">📎 File</a>` : ''}
+      
+      <!-- Customer Details Grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
+        <div style="background:#f8fafc;padding:12px;border-radius:12px">
+          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📧 Email</div>
+          <div style="font-size:.88rem;font-weight:600;color:var(--dark);word-break:break-all">${email}</div>
+        </div>
+        <div style="background:#f8fafc;padding:12px;border-radius:12px">
+          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📱 Phone / WhatsApp</div>
+          <div style="font-size:.88rem;font-weight:600;color:var(--dark)">${phone}</div>
+          ${phone !== '—' ? `<a href="https://wa.me/91${phone.replace(/\D/g,'')}" target="_blank" style="display:inline-block;margin-top:6px;background:#25D366;color:#fff;padding:4px 12px;border-radius:50px;font-size:.75rem;font-weight:700;text-decoration:none">💬 WhatsApp</a>` : ''}
+        </div>
+        <div style="background:#f8fafc;padding:12px;border-radius:12px">
+          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🏫 University / Institution</div>
+          <div style="font-size:.88rem;font-weight:600;color:var(--dark)">${university}</div>
+        </div>
+        <div style="background:#f8fafc;padding:12px;border-radius:12px">
+          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📆 Deadline</div>
+          <div style="font-size:.88rem;font-weight:600;color:var(--dark)">${deadline}</div>
+        </div>
       </div>
-      <div style="font-size:.8rem;color:var(--muted);margin-top:6px"><strong>Requirements:</strong> ${o.requirements || 'N/A'}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+      
+      <!-- Service & Amount -->
+      <div style="background:linear-gradient(135deg,#4f46e5,#0891b2);color:#fff;padding:16px;border-radius:12px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <div style="font-size:.7rem;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.5px">📚 Service / Assistance Needed</div>
+            <div style="font-size:1rem;font-weight:800;margin-top:4px">${o.service || 'Not specified'}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:.7rem;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.5px">💰 Amount Paid</div>
+            <div style="font-size:1.4rem;font-weight:900;margin-top:4px">₹${amount}</div>
+            <div style="font-size:.75rem;opacity:.8;margin-top:2px">UTR: ${refNo}</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Requirements -->
+      <div style="margin-bottom:16px">
+        <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Requirements / Details</div>
+        <div style="background:#fef3c7;padding:14px;border-radius:10px;font-size:.88rem;color:#92400e;line-height:1.6">${requirements}</div>
+      </div>
+      
+      <!-- File Section -->
+      <div style="margin-bottom:16px">
+        <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📎 Files</div>
+        ${fileLink ? `
+          <a href="${fileLink}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;background:var(--primary);color:#fff;padding:10px 20px;border-radius:10px;font-size:.85rem;font-weight:700;text-decoration:none">
+            📎 Open Uploaded File ↗
+          </a>
+        ` : `
+          <div style="background:#f1f5f9;padding:12px;border-radius:10px;color:var(--muted);font-size:.85rem;text-align:center">
+            No file uploaded
+          </div>
+        `}
+      </div>
+      
+      <!-- Expert Assignment & Progress -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
         <div>
-          <label style="font-size:.76rem;font-weight:700;color:var(--muted)">Assign to Expert</label>
-          <select class="admin-status-select" data-order-id="${doc.id}" onchange="assignOrderToExpert('${doc.id}', this.value)" style="width:100%;margin-top:4px">
+          <label style="font-size:.76rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">👩‍🏫 Assign to Expert</label>
+          <select class="admin-status-select" data-order-id="${doc.id}" onchange="assignOrderToExpert('${doc.id}', this.value)" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem">
             <option value="">-- Select Expert --</option>
           </select>
+          ${assignedExpert !== 'Not Assigned' ? `<div style="margin-top:6px;font-size:.78rem;color:var(--success);font-weight:600">✅ Assigned: ${assignedExpert}</div>` : ''}
         </div>
         <div>
-          <label style="font-size:.76rem;font-weight:700;color:var(--muted)">Progress</label>
-          <select class="admin-status-select" onchange="updateOrderProgress('${doc.id}', this.value)" style="width:100%;margin-top:4px">
-            ${['Not Assigned','Assigned','In Progress','Draft Ready','Under Review','Delivered','Cancelled'].map(p => `<option value="${p}" ${(o.progress||'Not Assigned')===p?'selected':''}>${p}</option>`).join('')}
+          <label style="font-size:.76rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">📌 Work Progress</label>
+          <select class="admin-status-select" onchange="updateOrderProgress('${doc.id}', this.value)" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem">
+            ${['Not Assigned','Assigned','In Progress','Draft Ready','Under Review','Delivered','Cancelled'].map(p => `<option value="${p}" ${progress===p?'selected':''}>${p}</option>`).join('')}
           </select>
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <input type="text" id="msg-${doc.id}" placeholder="Message to expert/client" value="${o.adminMessage || ''}" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.8rem" />
-        <button class="admin-status-select" type="button" onclick="saveOrderMessage('${doc.id}')">Save Message</button>
-        <button class="admin-status-select" type="button" onclick="cancelAssignment('${doc.id}')" style="background:#fee2e2;color:#991b1b;border-color:#fecaca">Cancel</button>
+      
+      <!-- Admin Message -->
+      <div style="margin-bottom:16px">
+        <label style="font-size:.76rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">💬 Admin Message / Notes</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="msg-${doc.id}" placeholder="Add a note for this order..." value="${adminMsg}" style="flex:1;padding:10px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem" />
+          <button onclick="saveOrderMessage('${doc.id}')" style="background:var(--success);color:#fff;border:none;padding:10px 20px;border-radius:10px;font-size:.85rem;font-weight:700;cursor:pointer;white-space:nowrap">Save</button>
+        </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-        <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Status:</label>
-        <select class="admin-status-select" onchange="updateOrderStatus('${doc.id}', this.value, this)">
-          ${['Pending','Confirmed','In Progress','Under Review','Delivered'].map(s =>
-            `<option value="${s}" ${(o.status||'Pending')===s?'selected':''}>${s}</option>`
-          ).join('')}
-        </select>
+      
+      <!-- Status Update -->
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:.78rem;font-weight:700;color:var(--muted)">Order Status:</label>
+          <select class="admin-status-select" onchange="updateOrderStatus('${doc.id}', this.value, this)" style="padding:8px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem;font-weight:600">
+            ${['Pending','Confirmed','In Progress','Under Review','Delivered'].map(s =>
+              `<option value="${s}" ${(o.status||'Pending')===s?'selected':''}>${s}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <button onclick="cancelAssignment('${doc.id}')" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:8px 16px;border-radius:10px;font-size:.8rem;font-weight:600;cursor:pointer">❌ Cancel Order</button>
       </div>
     </div>`;
   }).join('');
@@ -3806,6 +3949,7 @@ async function updateOrderStatus(docId, newStatus, selectEl) {
     <div class="dash-tab" id="adminTab" style="display:none;color:#ef4444" onclick="switchDashTab('admin',this)">🛡 Admin</div>
     <div class="dash-tab" id="adminChatTab" style="display:none;color:#ef4444" onclick="switchDashTab('adminchat',this)">📨 Admin Chat</div>
     <div class="dash-tab" id="expertAdminTab" style="display:none;color:#ef4444" onclick="switchDashTab('expertsadmin',this)">👩‍🏫 Experts</div>
+    <div class="dash-tab" id="adminFilesTab" style="display:none;color:#7c3aed" onclick="switchDashTab('adminfiles',this)">📎 All Files</div>
   </div>
 
   <!-- ORDERS TAB -->
@@ -3878,6 +4022,17 @@ async function updateOrderStatus(docId, newStatus, selectEl) {
   <!-- ADMIN CHAT TAB -->
   <div class="dash-pane" id="dpAdminchat" style="display:none">
     <div id="adminChatInbox">Loading chat inbox...</div>
+  </div>
+
+  <!-- ALL FILES TAB -->
+  <div class="dash-pane" id="dpAdminfiles" style="display:none">
+    <div style="margin-bottom:16px">
+      <div style="font-size:1rem;font-weight:800;color:var(--dark);margin-bottom:4px">📎 All Uploaded Files</div>
+      <div style="font-size:.82rem;color:var(--muted)">Files from all orders across the platform</div>
+    </div>
+    <div id="adminFilesList">
+      <p style="text-align:center;padding:30px;color:var(--muted)">⏳ Loading files...</p>
+    </div>
   </div>
 
   <!-- EXPERT ADMIN TAB -->
