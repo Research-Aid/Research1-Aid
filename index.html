@@ -2025,9 +2025,10 @@
         timestamp:    new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
       });
       results.admin = true;
-      console.log('Admin email sent:', adminResult);
+      console.log('✅ Admin email sent:', adminResult);
     } catch (adminErr) {
-      console.error('Admin email failed:', adminErr);
+      console.error('❌ Admin email failed:', adminErr);
+      alert('⚠️ Admin email failed. Check EmailJS template settings.');
     }
 
     // Send to client
@@ -2040,18 +2041,19 @@
         amount_paid: order.amountPaid
       });
       results.client = true;
-      console.log('Client email sent:', clientResult);
+      console.log('✅ Client email sent to:', order.email, clientResult);
     } catch (clientErr) {
-      console.error('Client email failed:', clientErr);
+      console.error('❌ Client email failed:', clientErr);
+      alert('⚠️ Client confirmation email failed. Check EmailJS template "template_zp83lus" settings.\n\nMake sure the template has "To Email" set to {{to_email}}');
     }
 
     // Show notification
     if (results.admin && results.client) {
-      showToast('📧 Confirmation emails sent to you and admin!', '✅', 5000);
+      showToast('✅ Emails sent to ' + order.email + ' and admin!', '📧', 5000);
     } else if (results.admin) {
-      showToast('📧 Admin notified. Check spam for your confirmation.', '📧', 5000);
+      showToast('✅ Admin notified. Check spam for your confirmation.', '📧', 5000);
     } else if (results.client) {
-      showToast('📧 Your confirmation sent. Admin will be notified.', '✅', 5000);
+      showToast('✅ Your confirmation sent. Admin will be notified.', '📧', 5000);
     } else {
       showToast('Order placed! Check WhatsApp for confirmation.', '⚠️', 6000);
     }
@@ -2117,574 +2119,32 @@
       amountPaid:  document.getElementById('amountPaid').value
     };
 
-    // Send to Google Sheets and Firestore in parallel
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
-    
-    const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
-    if (typeof db !== 'undefined') {
-      db.collection('orders').doc(orderId).set({
-        ...payload, uid: uid || '', status: 'Pending',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(() => {});
-    }
-
-    // Send emails IMMEDIATELY - both client and admin
-    btn.textContent = '📧 Sending emails...';
-    await sendOrderEmails(payload);
-
-    btn.textContent = '✅ Finalizing...';
-    
-    // Show confirmation modal
-    showConfirmModal(payload);
-    e.target.reset();
-    _mainSelectedFile = null;
-    document.getElementById('mainFileStatus').style.display = 'none';
-    document.getElementById('mainFileUploadBox').style.borderColor = 'var(--border)';
-    btn.textContent = '🚀 Submit Order';
-    btn.disabled = false;
-  }
-
-  // ── FEEDBACK ──
-  function submitFeedback(e) {
-    e.preventDefault();
-    const payload = {
-      type:    'FEEDBACK',
-      name:    document.getElementById('fbName').value || '',
-      contact: document.getElementById('fbContact').value || '',
-      service: document.getElementById('fbService').value || '',
-      rating:  currentRating,
-      message: document.getElementById('fbMessage').value || ''
-    };
-    // Google Sheets (backup)
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
-    // Firestore
-    if (typeof db !== 'undefined') {
-      db.collection('feedback').add({
-        ...payload,
-        uid: auth?.currentUser?.uid || '',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(() => {});
-    }
-    showToast('Thank you for your feedback! 💙');
-    e.target.reset(); setRating(0);
-  }
-
-  // ── GRIEVANCE ──
-  function submitGrievance(e) {
-    e.preventDefault();
-    const payload = {
-      type:      'GRIEVANCE',
-      name:      document.getElementById('grName').value || '',
-      contact:   document.getElementById('grContact').value || '',
-      orderId:   document.getElementById('grOrderId').value || '',
-      issueType: document.getElementById('grIssueType').value || '',
-      message:   document.getElementById('grMessage').value || ''
-    };
-    // Google Sheets (backup)
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
-    // Firestore
-    if (typeof db !== 'undefined') {
-      db.collection('grievances').add({
-        ...payload,
-        uid: auth?.currentUser?.uid || '',
-        status: 'Open',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(() => {});
-    }
-    showToast('Grievance submitted! We resolve within 48 hours.', '⚠️');
-    e.target.reset();
-  }
-
-  // ── SUGGESTION ──
-  function submitSuggestion(e) {
-    e.preventDefault();
-    const payload = {
-      type:     'SUGGESTION',
-      name:     document.getElementById('sgName').value || 'Anonymous',
-      email:    document.getElementById('sgEmail').value || '',
-      category: document.getElementById('sgCategory').value || '',
-      message:  document.getElementById('sgMessage').value || ''
-    };
-    // Google Sheets (backup)
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
-    // Firestore
-    if (typeof db !== 'undefined') {
-      db.collection('suggestions').add({
-        ...payload,
-        uid: auth?.currentUser?.uid || '',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(() => {});
-    }
-    showToast('Suggestion received! Thank you. 💡');
-    e.target.reset();
-  }
-
-  // ── EXPERT APPLICATION ──
-  async function submitExpertApplication(e) {
-    e.preventDefault();
-    const btn = document.getElementById('expertSubmitBtn');
-    btn.disabled = true;
-    btn.textContent = '⏳ Uploading documents...';
-
-    const get = id => document.getElementById(id);
-    const val = id => (get(id)?.value || '').trim();
-    const file = id => get(id)?.files?.[0] || null;
-
-    const fullName = val('exFullName');
-    const expertEmail = val('exEmail');
-    const expertPassword = get('exPassword')?.value || '';
-    const expertPassword2 = get('exPassword2')?.value || '';
-    if (fullName.length < 2) {
-      showToast('Please enter valid full name.', '❌');
-      btn.disabled = false;
-      btn.textContent = '📩 Submit Expert Application';
-      return;
-    }
-    if (expertPassword.length < 6) {
-      showToast('Password must be at least 6 characters.', '❌');
-      btn.disabled = false;
-      btn.textContent = '📩 Submit Expert Application';
-      return;
-    }
-    if (expertPassword !== expertPassword2) {
-      showToast('Password and confirm password do not match.', '❌');
-      btn.disabled = false;
-      btn.textContent = '📩 Submit Expert Application';
-      return;
-    }
-
-    // Ensure expert login credentials exist in Firebase Auth
+// Send to Google Sheets and Firestore in parallel
     try {
-      if (!auth.currentUser) {
-        try {
-          await auth.createUserWithEmailAndPassword(expertEmail, expertPassword);
-        } catch (err) {
-          if (err.code === 'auth/email-already-in-use') {
-            await auth.signInWithEmailAndPassword(expertEmail, expertPassword);
-          } else {
-            throw err;
-          }
-        }
-      } else if ((auth.currentUser.email || '').toLowerCase() !== expertEmail.toLowerCase()) {
-        showToast('Login mismatch. Please use same account as expert email.', '❌');
-        btn.disabled = false;
-        btn.textContent = '📩 Submit Expert Application';
-        return;
-      }
-
-      const uid = auth.currentUser?.uid;
-      if (uid) {
-        await db.collection('users').doc(uid).set({
-          name: fullName,
-          email: expertEmail,
-          phone: val('exPhone'),
-          role: 'expert-applicant',
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        }, { merge: true });
-      }
-    } catch (authErr) {
-      showToast('Could not create expert login. ' + friendlyAuthError(authErr.code), '❌', 4500);
-      btn.disabled = false;
-      btn.textContent = '📩 Submit Expert Application';
-      return;
+      fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(e => console.error('Sheet error:', e));
+    } catch (sheetErr) {
+      console.error('Sheet save failed:', sheetErr);
     }
-    const applicationId = 'EX-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 90000) + 10000);
-
-    const requiredFiles = [
-      { key: 'resumeUrl', name: 'Resume', input: 'exResume' },
-      { key: 'photoUrl', name: 'Photo', input: 'exPhoto' },
-      { key: 'signatureUrl', name: 'Signature', input: 'exSignature' },
-      { key: 'instituteIdUrl', name: 'Institute ID', input: 'exInstituteId' },
-      { key: 'qualificationDocUrl', name: 'Qualification Proof', input: 'exQualificationDoc' }
-    ];
-
-    const fileUrls = {};
-    for (const item of requiredFiles) {
-      const f = file(item.input);
-      if (!f) {
-        showToast(item.name + ' is required.', '❌');
-        btn.disabled = false;
-        btn.textContent = '📩 Submit Expert Application';
-        return;
-      }
-      btn.textContent = '⏳ Uploading ' + item.name + '...';
-      const url = await uploadFileToDrive(f, applicationId, fullName);
-      if (!url) {
-        showToast(item.name + ' upload failed. Please retry.', '❌', 4200);
-        btn.disabled = false;
-        btn.textContent = '📩 Submit Expert Application';
-        return;
-      }
-      fileUrls[item.key] = url;
-    }
-
-    btn.textContent = '⏳ Submitting application...';
-
-    const payload = {
-      type: 'EXPERT_APPLICATION',
-      applicationId,
-      fullName,
-      name: fullName,
-      email: expertEmail,
-      phone: val('exPhone'),
-      cityState: val('exCity'),
-      qualification: val('exQualification'),
-      experienceYears: val('exExperience'),
-      branch: val('exBranch'),
-      availability: val('exAvailability'),
-      subjects: val('exSubjects'),
-      tools: val('exTools'),
-      academicProfile: val('exAcademic'),
-      statement: val('exStatement'),
-      linkedin: val('exLinkedin'),
-      portfolio: val('exPortfolio'),
-      loginEmail: expertEmail,
-      status: 'Applied',
-      ...fileUrls
-    };
-
-    let sheetSaved = false;
+    
+    // Save to Firestore with error logging
     try {
-      await fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) });
-      sheetSaved = true;
-    } catch (_) {}
-
-    let firestoreSaved = false;
-    let firestoreErrMsg = '';
-    if (typeof db !== 'undefined') {
-      try {
-        const finalUser = await waitForAuthUser(6000);
-        const finalUid = finalUser?.uid || auth?.currentUser?.uid || '';
-        if (!finalUid) throw new Error('Authentication not ready. Please login again and retry.');
-        await db.collection('expertApplications').doc(applicationId).set({
-          ...payload,
-          uid: finalUid,
+      const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
+      if (typeof db !== 'undefined') {
+        await db.collection('orders').doc(orderId).set({
+          ...payload, uid: uid || '', status: 'Pending',
           timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
-        firestoreSaved = true;
-      } catch (e) {
-        console.error('expertApplications save failed:', e);
-        firestoreErrMsg = friendlyAuthError(e.code) || e.message || 'Unknown Firestore error';
+        console.log('✅ Order saved to Firestore:', orderId);
       }
-    }
-
-    if (firestoreSaved) {
-      showToast('Application submitted successfully! It is visible in admin expert panel.', '✅', 5200);
-    } else if (sheetSaved) {
-      showToast('Saved to Drive/Sheet only. Firebase failed: ' + firestoreErrMsg, '⚠️', 7000);
-    } else {
-      showToast('Submission failed. Please retry after login.', '❌', 5200);
-      btn.disabled = false;
-      btn.textContent = '📩 Submit Expert Application';
-      return;
-    }
-
-    e.target.reset();
-    btn.disabled = false;
-    btn.textContent = '📩 Submit Expert Application';
-  }
-
-  // ── TRACK ──
-  async function trackOrder() {
-    const id  = document.getElementById('trackId').value.trim().toUpperCase();
-    const box = document.getElementById('trackResult');
-    if (!id) { showToast('Please enter an Order ID.', '❌'); return; }
-
-    box.style.display = 'block';
-    box.innerHTML = '<p style="text-align:center;padding:18px;color:var(--muted)">⏳ Looking up your order…</p>';
-
-    try {
-      // Query by orderId field
-      const snap = await db.collection('orders').where('orderId', '==', id).limit(1).get();
-      if (snap.empty) {
-        box.innerHTML = `<p style="color:var(--danger);font-weight:700;padding:14px 0">❌ No order found with ID <strong>${id}</strong>.<br><span style="font-weight:400;font-size:.88rem;color:var(--muted)">Check the ID in your confirmation email or WhatsApp message.</span></p>`;
-        return;
-      }
-
-      const o = snap.docs[0].data();
-      const statusMap = {
-        'Pending':       { step: 1, color: '#f59e0b', label: 'Pending — Payment Verification' },
-        'Confirmed':     { step: 2, color: '#3b82f6', label: 'Confirmed — Work Starting Soon' },
-        'In Progress':   { step: 2, color: '#6366f1', label: 'In Progress — Expert Working' },
-        'Under Review':  { step: 3, color: '#8b5cf6', label: 'Under Quality Review' },
-        'Delivered':     { step: 4, color: '#10b981', label: 'Delivered ✓' },
-      };
-      const s = statusMap[o.status] || { step: 1, color: '#f59e0b', label: o.status || 'Pending' };
-
-      const steps = [
-        { label: 'Order Received',  desc: 'Payment confirmed and order registered.' },
-        { label: 'Work In Progress', desc: 'Our expert is working on your document.' },
-        { label: 'Quality Review',  desc: 'Document under review before delivery.' },
-        { label: 'Delivered',       desc: 'Sent to your email & WhatsApp.' },
-      ];
-
-      const stepsHTML = steps.map((st, i) => {
-        const done    = (i + 1) < s.step;
-        const active  = (i + 1) === s.step;
-        const pending = (i + 1) > s.step;
-        const dotCls  = done ? '' : (active ? 'style="background:'+s.color+'"' : 'class="track-dot pending"');
-        return `<div class="track-step">
-          <div class="track-dot" ${done ? '' : dotCls}></div>
-          <div>
-            <strong style="${active ? 'color:'+s.color : ''}">${st.label}${active ? ' ◀' : ''}</strong><br>
-            <span style="font-size:.8rem;color:var(--muted)">${active ? '<strong style="color:'+s.color+'">'+s.label+'</strong>' : (done ? '✓ Done' : 'Pending')}</span>
-          </div>
-        </div>`;
-      }).join('');
-
-      const ts = o.timestamp?.seconds ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'}) : '—';
-
-      box.innerHTML = `
-        <div style="background:#f8fafc;border-radius:12px;padding:14px 16px;margin-bottom:16px;border:1px solid var(--border)">
-          <div style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Order ID</div>
-          <div style="font-family:monospace;font-size:1.1rem;font-weight:800;color:var(--dark)">${o.orderId}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
-            <div><div style="font-size:.72rem;color:var(--muted)">Service</div><div style="font-size:.86rem;font-weight:700">${o.service || '—'}</div></div>
-            <div><div style="font-size:.72rem;color:var(--muted)">Status</div><div style="font-size:.86rem;font-weight:800;color:${s.color}">${o.status || 'Pending'}</div></div>
-            <div><div style="font-size:.72rem;color:var(--muted)">Amount Paid</div><div style="font-size:.86rem;font-weight:700">₹${o.amountPaid || '—'}</div></div>
-            <div><div style="font-size:.72rem;color:var(--muted)">Order Date</div><div style="font-size:.86rem;font-weight:700">${ts}</div></div>
-          </div>
-        </div>
-        ${stepsHTML}`;
-    } catch(err) {
-      box.innerHTML = '<p style="color:var(--danger);padding:14px 0">⚠️ Could not fetch order. Please try again or contact us on WhatsApp.</p>';
-      console.error(err);
-    }
-  }
-
-  // ── FILE UPLOAD HELPERS ──
-  const MAX_FILE_BYTES = 20 * 1024 * 1024; // 20MB
-
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function uploadFileToDrive(file, orderId, name) {
-    if (file.size > MAX_FILE_BYTES) {
-      showToast('File too large. Max 20MB. Use Google Drive link instead.', '❌', 4000);
-      return null;
-    }
-
-    try {
-      const b64 = await fileToBase64(file);
-      const payload = {
-        type: 'FILE_UPLOAD',
-        orderId: orderId || '',
-        name: name || '',
-        fileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        fileData: b64
-      };
-
-      const send = async (asJson) => {
-        const res = await fetch(SHEET_URL, {
-          method: 'POST',
-          headers: asJson ? { 'Content-Type': 'application/json' } : undefined,
-          body: JSON.stringify(payload)
-        });
-        const text = await res.text();
-        let json = {};
-        try { json = JSON.parse(text); } catch (_) {}
-        if (json.status === 'success' && json.fileUrl) return { ok: true, url: json.fileUrl };
-        if (json.status === 'success' && !json.fileUrl) {
-          return { ok: false, msg: 'Apps Script returned success but no fileUrl. Redeploy latest appsscript.js web app.' };
-        }
-        return { ok: false, msg: json.message || text || 'Unknown upload error' };
-      };
-
-      let attempt = await send(false);
-      if (!attempt.ok) attempt = await send(true);
-      if (attempt.ok) return attempt.url;
-
-      const msg = String(attempt.msg).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-      showToast('Upload failed: ' + msg, '❌', 4500);
-      console.error('Apps Script upload failed:', attempt.msg);
-      return null;
-    } catch (e) {
-      console.error('Upload error:', e);
-      showToast('Upload failed. Check Apps Script deployment access.', '❌', 4500);
-      return null;
-    }
-  }
-
-  // Paywall modal file
-  let _svcSelectedFile = null;
-  function svcFileSelected(input) {
-    const file = input.files[0];
-    if (!file) return;
-    if (file.size > MAX_FILE_BYTES) { showToast('File too large. Max 20MB.','❌'); input.value=''; return; }
-    _svcSelectedFile = file;
-    const box = document.getElementById('svcFileStatus');
-    box.style.display = 'block';
-    box.textContent = '📎 ' + file.name + ' (' + (file.size/1024/1024).toFixed(2) + ' MB) — ready to upload';
-    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--success)';
-  }
-  function svcHandleDrop(e) {
-    e.preventDefault();
-    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
-    const file = e.dataTransfer.files[0];
-    if (file) { document.getElementById('svcFileInput').files; _svcSelectedFile = file; svcFileSelected({ files: [file] }); }
-  }
-
-  // Main order form file
-  let _mainSelectedFile = null;
-  function mainFileSelected(input) {
-    const file = input.files[0];
-    if (!file) return;
-    if (file.size > MAX_FILE_BYTES) { showToast('File too large. Max 20MB.','❌'); input.value=''; return; }
-    _mainSelectedFile = file;
-    const box = document.getElementById('mainFileStatus');
-    box.style.display = 'block';
-    box.textContent = '📎 ' + file.name + ' (' + (file.size/1024/1024).toFixed(2) + ' MB) — ready to upload';
-    document.getElementById('mainFileUploadBox').style.borderColor = 'var(--success)';
-  }
-  function mainHandleDrop(e) {
-    e.preventDefault();
-    document.getElementById('mainFileUploadBox').style.borderColor = 'var(--border)';
-    const file = e.dataTransfer.files[0];
-    if (file) { _mainSelectedFile = file; mainFileSelected({ files: [file] }); }
-  }
-
-  // ── SERVICE PAYWALL MODAL ──
-  let _svcService = '', _svcPrice = '', _svcMin = 0, _svcEmoji = '📚';
-
-  function openServiceModal(service, price, minAmount, emoji) {
-    _svcService = service;
-    _svcPrice   = price;
-    _svcMin     = parseFloat(minAmount) || 0;
-    _svcEmoji   = emoji || '📚';
-    document.getElementById('svcModalTitle').textContent = _svcEmoji + ' ' + service;
-    document.getElementById('svcPriceDisplay').textContent = price;
-    document.getElementById('svcPriceStep2').textContent = price;
-    document.getElementById('svcServiceLabel').textContent = service;
-    document.getElementById('svcServiceEmoji').textContent = _svcEmoji;
-    document.getElementById('svcStep1Form').reset();
-    document.getElementById('svcUtr').value = '';
-    document.getElementById('svcAmtPaid').value = '';
-    _svcSelectedFile = null;
-    document.getElementById('svcFileStatus').style.display = 'none';
-    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
-    svcGoStep(1);
-    document.getElementById('serviceModal').classList.add('open');
-  }
-
-  function closeServiceModal() {
-    document.getElementById('serviceModal').classList.remove('open');
-  }
-
-  function svcGoStep(n) {
-    [1,2,3].forEach(i => {
-      document.getElementById('svcStep'+i).style.display = (i === n) ? 'block' : 'none';
-    });
-    if (n === 2) {
-      document.getElementById('svcPriceStep2').textContent = _svcPrice;
-    }
-    // auto-focus relevant field
-    setTimeout(() => {
-      if (n === 1) document.getElementById('svcName')?.focus();
-      if (n === 2) document.getElementById('svcUtr')?.focus();
-      if (n === 3) document.getElementById('svcSubmitBtn')?.focus();
-    }, 80);
-    // update step dots
-    ['dot1','dot2','dot3'].forEach((id, idx) => {
-      const dot = document.getElementById(id);
-      dot.classList.remove('active','done');
-      if (idx + 1 < n)  dot.classList.add('done');
-      if (idx + 1 === n) dot.classList.add('active');
-    });
-    ['line12','line23'].forEach((id, idx) => {
-      const line = document.getElementById(id);
-      line.classList.toggle('done', n > idx + 1);
-    });
-  }
-
-  function svcProceedFromStep1() {
-    const name = document.getElementById('svcName').value.trim();
-    const email = document.getElementById('svcEmail').value.trim();
-    const phone = document.getElementById('svcPhone').value.trim();
-    const req = document.getElementById('svcRequirements').value.trim();
-    if (!name) { showToast('Please enter your full name.', '❌'); return; }
-    if (!email) { showToast('Please enter your email address.', '❌'); return; }
-    if (!phone) { showToast('Please enter your WhatsApp number.', '❌'); return; }
-    if (!req) { showToast('Please describe your requirements.', '❌'); return; }
-    svcGoStep(2);
-  }
-
-  function svcVerifyUtr() {
-    const utr = document.getElementById('svcUtr').value.trim();
-    const amt = document.getElementById('svcAmtPaid').value.trim();
-    if (!utr) { showToast('Please enter your UTR / Transaction ID.', '❌'); return; }
-    if (!amt || parseFloat(amt) <= 0) { showToast('Please enter the amount you paid.', '❌'); return; }
-    document.getElementById('svcReviewName').textContent = document.getElementById('svcName').value.trim();
-    document.getElementById('svcReviewEmail').textContent = document.getElementById('svcEmail').value.trim();
-    document.getElementById('svcReviewPhone').textContent = document.getElementById('svcPhone').value.trim();
-    document.getElementById('svcReviewSubject').textContent = document.getElementById('svcSubject').value.trim() || '—';
-    document.getElementById('svcReviewReq').textContent = document.getElementById('svcRequirements').value.trim();
-    document.getElementById('svcReviewDeadline').textContent = document.getElementById('svcDeadline').value || 'Flexible';
-    document.getElementById('svcReviewUtr').textContent = utr;
-    document.getElementById('svcReviewAmt').textContent = '₹' + amt;
-    svcGoStep(3);
-  }
-
-  async function svcSubmitOrder(e) {
-    e.preventDefault();
-    const btn = document.getElementById('svcSubmitBtn');
-    btn.textContent = '⏳ Submitting...';
-    btn.disabled = true;
-
-    const name    = document.getElementById('svcName').value.trim();
-    const orderId = 'SA-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random()*9000)+1000);
-
-    // Upload file to Drive first if one was selected
-    let fileLink = document.getElementById('svcDriveLink').value.trim();
-    if (_svcSelectedFile) {
-      btn.textContent = '☁️ Uploading file...';
-      const driveUrl = await uploadFileToDrive(_svcSelectedFile, orderId, name);
-      if (driveUrl) {
-        fileLink = driveUrl;
-        showToast('File uploaded to Drive!', '☁️', 3000);
-      } else {
-        showToast('File upload failed — order will still be placed.', '⚠️', 3500);
-      }
-    }
-
-    btn.textContent = '📧 Sending notifications...';
-
-    const payload = {
-      type:         'ORDER',
-      orderId,
-      name,
-      email:        document.getElementById('svcEmail').value.trim(),
-      phone:        document.getElementById('svcPhone').value.trim(),
-      service:      _svcService,
-      subject:      document.getElementById('svcSubject').value.trim(),
-      university:   document.getElementById('svcUniversity').value.trim(),
-      deadline:     document.getElementById('svcDeadline').value,
-      requirements: document.getElementById('svcRequirements').value.trim(),
-      fileLink:     fileLink,
-      refNo:        document.getElementById('svcUtr').value.trim(),
-      amountPaid:   document.getElementById('svcAmtPaid').value.trim()
-    };
-
-    // Send data to Google Sheets and Firestore in parallel with emails
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
-    
-    const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
-    if (typeof db !== 'undefined') {
-      db.collection('orders').doc(orderId).set({
-        ...payload, uid: uid || '', status: 'Pending',
-        timestamp: firebase.firestore.FieldValue.serverTimestamp()
-      }).catch(() => {});
+    } catch (firestoreErr) {
+      console.error('❌ Firestore save failed:', firestoreErr);
+      alert('⚠️ Order saved to Google Sheets but NOT to Firestore.\nCheck Firestore rules.\n\nError: ' + firestoreErr.message);
     }
 
     // Send emails IMMEDIATELY - both client and admin
     btn.textContent = '📧 Sending emails...';
     const emailResults = await sendOrderEmails(payload);
+    console.log('📧 Email results:', emailResults);
 
     btn.textContent = '✅ Finalizing...';
     
@@ -3280,101 +2740,124 @@ async function adminReplyChat(uid, userEmail) {
 async function loadAdminOrders() {
   const list   = document.getElementById('adminOrdersList');
   const filter = document.getElementById('adminFilterStatus')?.value || '';
-  list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading…</p>';
+  list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading from Firestore...</p>';
 
+  let allDocs = [];
+  
   try {
-    // Index-free query: fetch docs, then sort/filter client-side.
-    // This works even when timestamp indexes are missing.
+    // First try Firestore
     const all = await db.collection('orders').limit(300).get();
-    let docs = all.docs;
-    if (filter) docs = docs.filter(d => (d.data().status || 'Pending') === filter);
-    docs = docs.sort((a, b) => {
-      const at = a.data().timestamp?.seconds || 0;
-      const bt = b.data().timestamp?.seconds || 0;
-      return bt - at;
-    });
-    const snap = { empty: docs.length === 0, docs };
-
-    if (snap.empty) {
-      list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">No orders found.</p>';
-      return;
+    allDocs = all.docs;
+    console.log('✅ Firestore orders loaded:', allDocs.length);
+  } catch(firestoreErr) {
+    console.error('❌ Firestore load failed, trying Google Sheets:', firestoreErr);
+    
+    // Fallback to Google Sheets
+    try {
+      list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--accent)">⚠️ Firestore error. Loading from Google Sheets...</p>';
+      const response = await fetch(SHEET_URL);
+      const data = await response.json();
+      if (data && Array.isArray(data)) {
+        // Parse Google Sheets data
+        const headers = data[0] || [];
+        allDocs = data.slice(1).map(row => {
+          const obj = {};
+          headers.forEach((h, i) => obj[h] = row[i]);
+          return { id: obj.orderId, data: () => obj };
+        });
+        console.log('✅ Google Sheets orders loaded:', allDocs.length);
+      }
+    } catch(sheetErr) {
+      console.error('Google Sheets also failed:', sheetErr);
     }
+  }
 
-    const statusCls = {
-      'Pending':'pending','Confirmed':'confirmed',
-      'In Progress':'progress','Under Review':'review','Delivered':'delivered'
-    };
+  let docs = allDocs;
+  if (filter) docs = docs.filter(d => (d.data().status || 'Pending') === filter);
+  docs = docs.sort((a, b) => {
+    const at = a.data().timestamp?.seconds || 0;
+    const bt = b.data().timestamp?.seconds || 0;
+    return bt - at;
+  });
 
-    list.innerHTML = snap.docs.map(doc => {
-      const o   = normalizeOrderRecord(doc.data(), doc.id);
-      const ts  = o.timestamp?.seconds
-        ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })
-        : '—';
-      const cls = statusCls[o.status] || 'pending';
-      return `<div class="admin-order-row">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
-          <div>
-            <div class="ao-id">${o.orderId}</div>
-            <div class="ao-name">${o.name}</div>
-            <div class="ao-svc">${o.service}</div>
-          </div>
-          <span class="ao-status ${cls}">${o.status}</span>
-        </div>
-        <div class="ao-meta">
-          <span>📧 ${o.email}</span>
-          <span>📱 ${o.phone}</span>
-          <span>🏫 ${o.university}</span>
-          <span>📆 Deadline: ${o.deadline}</span>
-          <span>👩‍🏫 Expert: ${o.assignedExpertName}</span>
-          <span>📌 Progress: ${o.progress}</span>
-          <span>⭐ Rating: ${o.expertRating}</span>
-          <span>₹${o.amountPaid}</span>
-          <span>🗓 ${ts}</span>
-          ${o.fileLink ? `<a href="${o.fileLink}" target="_blank" style="color:var(--primary);font-weight:700">📎 File</a>` : ''}
-        </div>
-        <div style="font-size:.8rem;color:var(--muted);margin-top:6px"><strong>Requirements:</strong> ${o.requirements}</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
-          <div>
-            <label style="font-size:.76rem;font-weight:700;color:var(--muted)">Move Assignment To Expert</label>
-            <select class="admin-status-select" data-order-id="${doc.id}" onchange="assignOrderToExpert('${doc.id}', this.value)" style="width:100%;margin-top:4px">
-              <option value="">-- Select Qualified Expert --</option>
-            </select>
-          </div>
-          <div>
-            <label style="font-size:.76rem;font-weight:700;color:var(--muted)">Assignment Progress</label>
-            <select class="admin-status-select" onchange="updateOrderProgress('${doc.id}', this.value)" style="width:100%;margin-top:4px">
-              ${['Not Assigned','Assigned','In Progress','Draft Ready','Under Review','Delivered','Cancelled'].map(p => `<option value="${p}" ${(o.progress||'Not Assigned')===p?'selected':''}>${p}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
-          <input type="text" id="msg-${doc.id}" placeholder="Message to expert/client" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.8rem" />
-          <select id="admin-rate-${doc.id}" class="admin-status-select" style="margin-top:0">
-            <option value="">Admin Rating</option><option value="5">⭐⭐⭐⭐⭐</option><option value="4">⭐⭐⭐⭐</option><option value="3">⭐⭐⭐</option><option value="2">⭐⭐</option><option value="1">⭐</option>
-          </select>
-          <button class="admin-status-select" type="button" onclick="saveAdminExpertRating('${doc.id}')">Save Rating</button>
-          <button class="admin-status-select" type="button" onclick="saveOrderMessage('${doc.id}')">Save Message</button>
-          <button class="admin-status-select" type="button" onclick="cancelAssignment('${doc.id}')" style="background:#fee2e2;color:#991b1b;border-color:#fecaca">Cancel Assignment</button>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
-          <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Update Status:</label>
-          <select class="admin-status-select" onchange="updateOrderStatus('${doc.id}', this.value, this)">
-            ${['Pending','Confirmed','In Progress','Under Review','Delivered'].map(s =>
-              `<option value="${s}" ${o.status===s?'selected':''}>${s}</option>`
-            ).join('')}
-          </select>
-        </div>
-      </div>`;
-    }).join('');
-
-    await hydrateQualifiedExpertsDropdowns();
-  } catch(err) {
-    console.error('Admin load error:', err);
-    list.innerHTML = `<div style="padding:14px">
-      <p style="color:var(--danger);font-weight:700">⚠️ Could not load orders.</p>
-      <p style="font-size:.82rem;color:var(--muted);margin-top:6px">Error: ${err.message}</p>
-      <p style="font-size:.82rem;color:var(--muted);margin-top:6px">This is usually a <strong>Firestore rules</strong> issue. Make sure logged-in users can read <code>orders</code>.</p>
+  if (docs.length === 0) {
+    list.innerHTML = `<div style="padding:20px;text-align:center">
+      <p style="color:var(--muted);font-size:1rem">No orders found.</p>
+      <p style="color:var(--muted);font-size:.85rem;margin-top:8px">Orders will appear here once placed through the website.</p>
+      <p style="color:var(--danger);font-size:.82rem;margin-top:12px">If orders should exist, check:</p>
+      <ul style="text-align:left;font-size:.82rem;color:var(--muted);margin-top:8px;list-style:disc;padding-left:20px">
+        <li>Firestore rules allow reading 'orders' collection</li>
+        <li>Orders are actually being saved (check browser console)</li>
+        <li>EmailJS is configured correctly</li>
+      </ul>
     </div>`;
+    return;
+  }
+
+  const statusCls = {
+    'Pending':'pending','Confirmed':'confirmed',
+    'In Progress':'progress','Under Review':'review','Delivered':'delivered'
+  };
+
+  list.innerHTML = `<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Showing ${docs.length} orders</p>` + docs.map(doc => {
+    const o   = normalizeOrderRecord(doc.data(), doc.id);
+    const ts  = o.timestamp?.seconds
+      ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric' })
+      : (o.timestamp || '—');
+    const cls = statusCls[o.status] || 'pending';
+    return `<div class="admin-order-row">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+        <div>
+          <div class="ao-id">${o.orderId || doc.id}</div>
+          <div class="ao-name">${o.name || 'N/A'}</div>
+          <div class="ao-svc">${o.service || 'N/A'}</div>
+        </div>
+        <span class="ao-status ${cls}">${o.status || 'Pending'}</span>
+      </div>
+      <div class="ao-meta">
+        <span>📧 ${o.email || 'N/A'}</span>
+        <span>📱 ${o.phone || 'N/A'}</span>
+        <span>🏫 ${o.university || 'N/A'}</span>
+        <span>📆 Deadline: ${o.deadline || 'N/A'}</span>
+        <span>👩‍🏫 Expert: ${o.assignedExpertName || 'Not Assigned'}</span>
+        <span>📌 Progress: ${o.progress || 'Not Assigned'}</span>
+        <span>₹${o.amountPaid || o.amount_paid || 'N/A'}</span>
+        <span>🗓 ${ts}</span>
+        ${o.fileLink ? `<a href="${o.fileLink}" target="_blank" style="color:var(--primary);font-weight:700">📎 File</a>` : ''}
+      </div>
+      <div style="font-size:.8rem;color:var(--muted);margin-top:6px"><strong>Requirements:</strong> ${o.requirements || 'N/A'}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+        <div>
+          <label style="font-size:.76rem;font-weight:700;color:var(--muted)">Assign to Expert</label>
+          <select class="admin-status-select" data-order-id="${doc.id}" onchange="assignOrderToExpert('${doc.id}', this.value)" style="width:100%;margin-top:4px">
+            <option value="">-- Select Expert --</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:.76rem;font-weight:700;color:var(--muted)">Progress</label>
+          <select class="admin-status-select" onchange="updateOrderProgress('${doc.id}', this.value)" style="width:100%;margin-top:4px">
+            ${['Not Assigned','Assigned','In Progress','Draft Ready','Under Review','Delivered','Cancelled'].map(p => `<option value="${p}" ${(o.progress||'Not Assigned')===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <input type="text" id="msg-${doc.id}" placeholder="Message to expert/client" value="${o.adminMessage || ''}" style="flex:1;min-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:.8rem" />
+        <button class="admin-status-select" type="button" onclick="saveOrderMessage('${doc.id}')">Save Message</button>
+        <button class="admin-status-select" type="button" onclick="cancelAssignment('${doc.id}')" style="background:#fee2e2;color:#991b1b;border-color:#fecaca">Cancel</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <label style="font-size:.78rem;font-weight:600;color:var(--muted)">Status:</label>
+        <select class="admin-status-select" onchange="updateOrderStatus('${doc.id}', this.value, this)">
+          ${['Pending','Confirmed','In Progress','Under Review','Delivered'].map(s =>
+            `<option value="${s}" ${(o.status||'Pending')===s?'selected':''}>${s}</option>`
+          ).join('')}
+        </select>
+      </div>
+    </div>`;
+  }).join('');
+
+  await hydrateQualifiedExpertsDropdowns();
+}
   }
 }
 
