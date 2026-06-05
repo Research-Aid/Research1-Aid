@@ -2458,17 +2458,14 @@ const db      = firebase.firestore();
 const storage = firebase.storage();
 
 // ── AUTH STATE LISTENER ──────────────────────────
-auth.onAuthStateChanged(async user => {
+auth.onAuthStateChanged(user => {
   const loginBtn = document.getElementById('navLoginBtn');
   const userBtn  = document.getElementById('navUserBtn');
   const avatar   = document.getElementById('navAvatar');
   const uname    = document.getElementById('navUserName');
 
   if (user) {
-    // Fetch profile from Firestore
-    const snap = await db.collection('users').doc(user.uid).get();
-    const prof = snap.exists ? snap.data() : {};
-    const displayName = prof.name || user.displayName || user.email.split('@')[0];
+    const displayName = user.displayName || user.email.split('@')[0];
     const initial     = displayName.charAt(0).toUpperCase();
 
     loginBtn.style.display = 'none';
@@ -2476,20 +2473,23 @@ auth.onAuthStateChanged(async user => {
     avatar.textContent     = initial;
     uname.textContent      = displayName.split(' ')[0];
 
-    // Show admin tabs for admin email
+    // Show admin tabs for admin email (non-blocking)
     const isAdmin = user.email === 'najarzain5@gmail.com';
     console.log('Auth state: user=', user.email, 'isAdmin=', isAdmin);
     const adminTab = document.getElementById('adminTab');
     const expertAdminTab = document.getElementById('expertAdminTab');
     const adminChatTab = document.getElementById('adminChatTab');
-    if (adminTab) { adminTab.style.display = isAdmin ? 'flex' : 'none'; console.log('adminTab display:', adminTab.style.display); }
+    if (adminTab) { adminTab.style.display = isAdmin ? 'flex' : 'none'; }
     if (expertAdminTab) expertAdminTab.style.display = isAdmin ? 'flex' : 'none';
     if (adminChatTab) adminChatTab.style.display = isAdmin ? 'flex' : 'none';
     const adminFilesTab = document.getElementById('adminFilesTab');
     if (adminFilesTab) adminFilesTab.style.display = isAdmin ? 'flex' : 'none';
 
-    // Auto-fill order forms
-    autoFillForms(user, prof);
+    // Fetch profile non-blocking (don't await in listener)
+    db.collection('users').doc(user.uid).get().then(snap => {
+      const prof = snap.exists ? snap.data() : {};
+      autoFillForms(user, prof);
+    }).catch(e => console.error('Profile fetch failed:', e.message));
   } else {
     loginBtn.style.display = '';
     userBtn.style.display  = 'none';
@@ -2559,7 +2559,7 @@ async function doLogin() {
     
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
-    setTimeout(() => openDashboard(), 500);
+    // Auth state listener will show user button - no need to call openDashboard here
   } catch(e) {
     console.error('Login error:', e.message);
     showAuthErr('login', friendlyAuthError(e.code));
@@ -2763,31 +2763,34 @@ function normalizeOrderRecord(o, id = '') {
 }
 
 // ── DASHBOARD ─────────────────────────────────────
-async function openDashboard() {
+function openDashboard() {
   const user = auth.currentUser;
   if (!user) return openAuthModal();
 
   document.getElementById('dashOverlay').classList.add('open');
   document.getElementById('dashPanel').classList.add('open');
 
-  // Load profile
-  const snap = await db.collection('users').doc(user.uid).get();
-  const prof = snap.exists ? snap.data() : {};
-  const name = prof.name || user.displayName || user.email;
+  // Set basic info immediately (non-blocking)
+  const name = user.displayName || user.email.split('@')[0];
   const init = name.charAt(0).toUpperCase();
-
+  
   document.getElementById('dashAvatar').textContent = init;
   document.getElementById('dashName').textContent   = name;
   document.getElementById('dashEmail').textContent  = user.email;
   document.getElementById('pName').textContent    = name;
   document.getElementById('pEmail').textContent   = user.email;
-  document.getElementById('pPhone').textContent   = prof.phone   || 'Not set';
-  document.getElementById('pCollege').textContent = prof.college || 'Not set';
-  document.getElementById('pSince').textContent   = prof.createdAt
-    ? new Date(prof.createdAt.seconds * 1000).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
-    : 'N/A';
 
-  // Load orders + expert profile
+  // Load profile in background (non-blocking)
+  db.collection('users').doc(user.uid).get().then(snap => {
+    const prof = snap.exists ? snap.data() : {};
+    document.getElementById('pPhone').textContent   = prof.phone   || 'Not set';
+    document.getElementById('pCollege').textContent = prof.college || 'Not set';
+    document.getElementById('pSince').textContent   = prof.createdAt
+      ? new Date(prof.createdAt.seconds * 1000).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
+      : 'N/A';
+  }).catch(e => console.error('Profile load error:', e.message));
+
+  // Load orders + expert profile (non-blocking)
   loadDashOrders(user.uid);
   loadExpertProfile(user.email);
 }
