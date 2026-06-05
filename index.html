@@ -1958,6 +1958,132 @@
     o.addEventListener('click', function(e) { if (e.target === this) this.classList.remove('open'); });
   });
 
+  // ── AUTH MODAL (must be in first script so always available) ──
+  function openAuthModal()  { document.getElementById('authOverlay').classList.add('open'); }
+  function closeAuthModal() { document.getElementById('authOverlay').classList.remove('open'); }
+  function switchAuthTab(tab) {
+    document.getElementById('tabLogin').classList.toggle('active',  tab === 'login');
+    document.getElementById('tabSignup').classList.toggle('active', tab === 'signup');
+    document.getElementById('paneLogin').classList.toggle('active', tab === 'login');
+    document.getElementById('paneSignup').classList.toggle('active',tab === 'signup');
+  }
+  function showAuthErr(pane, msg) {
+    const el = document.getElementById(pane + 'Err');
+    if (el) { el.textContent = msg; el.classList.add('show'); }
+    setTimeout(() => { if (el) el.classList.remove('show'); }, 6000);
+  }
+  function fbDebug(msg) {
+    console.log('[FB-DEBUG]', msg);
+    const box = document.getElementById('fbDebugBox');
+    if (box) { box.style.display = 'block'; box.innerHTML += msg + '<br>'; }
+  }
+  async function doLogin() {
+    const email = document.getElementById('loginEmail').value.trim();
+    const pass  = document.getElementById('loginPassword').value;
+    if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
+    
+    fbDebug('Login attempt: ' + email);
+    fbDebug('firebaseReady=' + (typeof firebaseReady !== 'undefined' ? firebaseReady : 'N/A') + ' auth=' + typeof auth);
+    
+    if (typeof firebaseReady === 'undefined' || !firebaseReady || typeof auth === 'undefined') {
+      fbDebug('BLOCKED: Firebase not ready');
+      showAuthErr('login', 'Firebase not loaded yet. Press Ctrl+Shift+R to hard-refresh the page.');
+      return;
+    }
+    
+    const btn = document.querySelector('#paneLogin .auth-submit');
+    if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
+
+    try {
+      fbDebug('Calling signInWithEmailAndPassword...');
+      const loginPromise = auth.signInWithEmailAndPassword(email, pass);
+      const result = await Promise.race([
+        loginPromise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Login timed out (10s) - Firebase may be blocked on your network')), 10000))
+      ]);
+      fbDebug('✅ Login SUCCESS: ' + result.user.email);
+      closeAuthModal();
+      showToast('Welcome back! 👋', '✅');
+    } catch(e) {
+      fbDebug('❌ Login FAILED: code=' + (e.code||'TIMEOUT') + ' msg=' + e.message);
+      console.error('Login error:', e.code, e.message);
+      const map = {
+        'auth/user-not-found':           'No account found with this email.',
+        'auth/wrong-password':           'Incorrect password.',
+        'auth/invalid-credential':       'Invalid email or password.',
+        'auth/email-already-in-use':     'This email is already registered.',
+        'auth/invalid-email':            'Please enter a valid email address.',
+        'auth/weak-password':            'Password must be at least 6 characters.',
+        'auth/too-many-requests':        'Too many attempts. Wait and try again.',
+        'auth/unauthorized-domain':      'Domain not authorized. Add it in Firebase Console > Authentication > Settings.',
+        'auth/operation-not-allowed':    'Email/Password login not enabled. Enable in Firebase Console > Authentication > Sign-in method.',
+        'auth/network-request-failed':   'Network error. Check your internet connection.',
+        'auth/popup-closed-by-user':     'Sign-in popup was closed.',
+      };
+      const errMsg = e.code ? (map[e.code] || e.code + ': ' + e.message) : e.message;
+      showAuthErr('login', errMsg);
+      if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
+    }
+  }
+  async function doSignup() {
+    const name    = document.getElementById('signupName').value.trim();
+    const email   = document.getElementById('signupEmail').value.trim();
+    const phone   = document.getElementById('signupPhone').value.trim();
+    const college = document.getElementById('signupCollege').value.trim();
+    const pass    = document.getElementById('signupPassword').value;
+    if (!name || !email || !pass) return showAuthErr('signup','Name, email and password are required.');
+    if (pass.length < 6) return showAuthErr('signup','Password must be at least 6 characters.');
+    if (typeof firebaseReady === 'undefined' || !firebaseReady || !auth) return showAuthErr('signup','Firebase not ready. Press Ctrl+Shift+R.');
+    
+    const btn = document.querySelector('#paneSignup .auth-submit');
+    if (btn) { btn.textContent = '⏳ Creating account...'; btn.disabled = true; }
+
+    try {
+      const cred = await auth.createUserWithEmailAndPassword(email, pass);
+      await cred.user.updateProfile({ displayName: name });
+      await db.collection('users').doc(cred.user.uid).set({
+        name, email, phone, college,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeAuthModal();
+      showToast('Account created! Welcome, ' + name.split(' ')[0] + ' 🎉', '✅', 4000);
+    } catch(e) {
+      showAuthErr('signup', e.code ? e.message : e.message);
+      if (btn) { btn.textContent = 'Create My Account'; btn.disabled = false; }
+    }
+  }
+  async function doGoogleSignIn() {
+    if (typeof firebaseReady === 'undefined' || !firebaseReady || !auth) return showAuthErr('login','Firebase not ready. Press Ctrl+Shift+R.');
+    const provider = new firebase.auth.GoogleAuthProvider();
+    try {
+      const cred = await auth.signInWithPopup(provider);
+      const user = cred.user;
+      const snap = await db.collection('users').doc(user.uid).get();
+      if (!snap.exists) {
+        await db.collection('users').doc(user.uid).set({
+          name: user.displayName || '', email: user.email || '',
+          phone: '', college: '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      closeAuthModal();
+      showToast('Welcome, ' + (user.displayName||'').split(' ')[0] + '! 👋', '✅');
+    } catch(e) {
+      showAuthErr('login', e.code ? e.message : e.message);
+    }
+  }
+  async function doResetPassword() {
+    if (typeof firebaseReady === 'undefined' || !firebaseReady || !auth) return showAuthErr('login','Firebase not ready. Press Ctrl+Shift+R.');
+    const email = document.getElementById('loginEmail').value.trim();
+    if (!email) return showAuthErr('login','Enter your email above first.');
+    try {
+      await auth.sendPasswordResetEmail(email);
+      showToast('Reset link sent to your email!', '📧', 4000);
+    } catch(e) {
+      showAuthErr('login', e.code ? e.message : e.message);
+    }
+  }
+
   // ── WHATSAPP ──
   function openWhatsApp() {
     const msg = encodeURIComponent("Hello Research Aid and Co! I need academic assistance. Please guide me on services and pricing.");
@@ -2448,12 +2574,6 @@
 let auth, db, storage;
 let firebaseReady = false;
 
-function fbDebug(msg) {
-  console.log('[FB-DEBUG]', msg);
-  const box = document.getElementById('fbDebugBox');
-  if (box) { box.style.display = 'block'; box.innerHTML += msg + '<br>'; }
-}
-
 try {
   if (typeof firebase === 'undefined') throw new Error('Firebase SDK script did not load');
   if (!firebase.app) throw new Error('firebase.app not available');
@@ -2560,72 +2680,7 @@ function autoFillForms(user, prof) {
   set('exPhone',     prof.phone || '');
 }
 
-// ── AUTH MODAL ────────────────────────────────────
-function openAuthModal()  { document.getElementById('authOverlay').classList.add('open'); }
-function closeAuthModal() { document.getElementById('authOverlay').classList.remove('open'); }
-
-function switchAuthTab(tab) {
-  document.getElementById('tabLogin').classList.toggle('active',  tab === 'login');
-  document.getElementById('tabSignup').classList.toggle('active', tab === 'signup');
-  document.getElementById('paneLogin').classList.toggle('active', tab === 'login');
-  document.getElementById('paneSignup').classList.toggle('active',tab === 'signup');
-}
-
-function showAuthErr(pane, msg) {
-  const el = document.getElementById(pane + 'Err');
-  el.textContent = msg; el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 5000);
-}
-
-async function doLogin() {
-  const email = document.getElementById('loginEmail').value.trim();
-  const pass  = document.getElementById('loginPassword').value;
-  if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
-  
-  fbDebug('Login attempt: ' + email);
-  fbDebug('firebaseReady=' + firebaseReady + ' auth=' + typeof auth);
-  
-  if (!firebaseReady || typeof auth === 'undefined') {
-    fbDebug('BLOCKED: Firebase not ready');
-    showAuthErr('login', 'Firebase not ready. Press Ctrl+Shift+R to hard-refresh.');
-    return;
-  }
-  
-  const btn = document.querySelector('#paneLogin .auth-submit');
-  if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
-
-  // Test Firebase Auth API reachability first
-  try {
-    fbDebug('Testing Firebase Auth API reachability...');
-    const testResp = await Promise.race([
-      fetch('https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({idToken:'test'}) }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('Firebase API unreachable (5s timeout)')), 5000))
-    ]);
-    fbDebug('Firebase API responded: status=' + testResp.status);
-  } catch(netErr) {
-    fbDebug('❌ Firebase API UNREACHABLE: ' + netErr.message);
-    showAuthErr('login', 'Cannot reach Firebase servers. Check your internet connection or try a different network. Error: ' + netErr.message);
-    if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
-    return;
-  }
-
-  try {
-    fbDebug('Calling signInWithEmailAndPassword...');
-    const loginPromise = auth.signInWithEmailAndPassword(email, pass);
-    const result = await Promise.race([
-      loginPromise,
-      new Promise((_, rej) => setTimeout(() => rej(new Error('Login timed out after 10s - Firebase servers may be blocked on your network')), 10000))
-    ]);
-    fbDebug('✅ Login SUCCESS: ' + result.user.email);
-    closeAuthModal();
-    showToast('Welcome back! 👋', '✅');
-  } catch(e) {
-    fbDebug('❌ Login FAILED: code=' + (e.code||'TIMEOUT') + ' msg=' + e.message);
-    console.error('Login error:', e.code, e.message);
-    showAuthErr('login', e.code ? friendlyAuthError(e.code, e.message) : e.message);
-    if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
-  }
-}
+// ── AUTH MODAL (defined in first script block) ──
 
 // Check Firebase loaded on page load
 window.addEventListener('load', () => {
@@ -2672,91 +2727,10 @@ function checkAdmin() {
   }
 }
 
-async function doSignup() {
-  const name    = document.getElementById('signupName').value.trim();
-  const email   = document.getElementById('signupEmail').value.trim();
-  const phone   = document.getElementById('signupPhone').value.trim();
-  const college = document.getElementById('signupCollege').value.trim();
-  const pass    = document.getElementById('signupPassword').value;
-  if (!name || !email || !pass) return showAuthErr('signup','Name, email and password are required.');
-  if (pass.length < 6) return showAuthErr('signup','Password must be at least 6 characters.');
-  if (!firebaseReady || !auth) return showAuthErr('signup','Firebase not ready. Press Ctrl+Shift+R to refresh.');
-  
-  const btn = document.querySelector('#paneSignup .auth-submit');
-  if (btn) { btn.textContent = '⏳ Creating account...'; btn.disabled = true; }
-
-  try {
-    const cred = await auth.createUserWithEmailAndPassword(email, pass);
-    await cred.user.updateProfile({ displayName: name });
-    await db.collection('users').doc(cred.user.uid).set({
-      name, email, phone, college,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    closeAuthModal();
-    showToast(`Account created! Welcome, ${name.split(' ')[0]} 🎉`, '✅', 4000);
-  } catch(e) {
-    showAuthErr('signup', friendlyAuthError(e.code, e.message));
-    if (btn) { btn.textContent = 'Create My Account'; btn.disabled = false; }
-  }
-}
-
-async function doGoogleSignIn() {
-  if (!firebaseReady || !auth) return showAuthErr('login','Firebase not ready. Press Ctrl+Shift+R to refresh.');
-  const provider = new firebase.auth.GoogleAuthProvider();
-  try {
-    const cred = await auth.signInWithPopup(provider);
-    const user = cred.user;
-    const snap = await db.collection('users').doc(user.uid).get();
-    if (!snap.exists) {
-      await db.collection('users').doc(user.uid).set({
-        name:  user.displayName || '',
-        email: user.email || '',
-        phone: '', college: '',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    }
-    closeAuthModal();
-    showToast(`Welcome, ${(user.displayName||'').split(' ')[0] || 'Scholar'}! 👋`, '✅');
-  } catch(e) {
-    showAuthErr('login', friendlyAuthError(e.code, e.message));
-  }
-}
-
-async function doResetPassword() {
-  if (!firebaseReady || !auth) return showAuthErr('login','Firebase not ready. Press Ctrl+Shift+R to refresh.');
-  const email = document.getElementById('loginEmail').value.trim();
-  if (!email) return showAuthErr('login','Enter your email above first.');
-  try {
-    await auth.sendPasswordResetEmail(email);
-    showToast('Reset link sent to your email!', '📧', 4000);
-  } catch(e) {
-    showAuthErr('login', friendlyAuthError(e.code, e.message));
-  }
-}
-
 async function doLogout() {
   await auth.signOut();
   closeDashboard();
   showToast('Logged out successfully.', '👋');
-}
-
-function friendlyAuthError(code, message) {
-  const map = {
-    'auth/user-not-found':           'No account found with this email. Sign up first.',
-    'auth/wrong-password':           'Incorrect password. Try again or reset it.',
-    'auth/email-already-in-use':     'This email is already registered.',
-    'auth/invalid-email':            'Please enter a valid email address.',
-    'auth/weak-password':            'Password must be at least 6 characters.',
-    'auth/too-many-requests':        'Too many attempts. Please wait and try again.',
-    'auth/popup-closed-by-user':     'Sign-in popup was closed.',
-    'auth/unauthorized-domain':      'This website domain is not authorized in Firebase. Add it in Firebase Console > Authentication > Settings > Authorized domains.',
-    'auth/operation-not-allowed':    'Email/Password login is not enabled in Firebase. Enable it in Firebase Console > Authentication > Sign-in method.',
-    'auth/network-request-failed':   'Network error. Check your internet connection and try again.',
-    'auth/invalid-credential':       'Invalid email or password. Check your credentials.',
-    'auth/account-exists-with-different-credential': 'An account already exists with this email using a different sign-in method.',
-    'auth/internal-error':           'Firebase internal error. Please try again later.',
-  };
-  return map[code] || 'Error: ' + (code || 'unknown') + '. ' + (message || '');
 }
 
 async function waitForAuthUser(timeoutMs = 5000) {
