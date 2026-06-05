@@ -2027,7 +2027,28 @@ function loadAdminOrders() {
   if (!list) return;
   list.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b">⏳ Loading orders...</p>';
 
+  var timeout = setTimeout(function() {
+    list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Firestore timeout (8s). Trying Google Sheets...</p></div>';
+    fetch(SHEET_URL + '?type=GET_ORDERS').then(function(r) { return r.json(); }).then(function(data) {
+      if (data && Array.isArray(data) && data.length > 1) {
+        var headers = data[0] || [];
+        var rows = data.slice(1);
+        if (filterVal) rows = rows.filter(function(row) { var si = headers.indexOf('status'); return si >= 0 ? row[si] === filterVal : true; });
+        if (rows.length === 0) { list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found (from Sheets).</p></div>'; return; }
+        var html = '<p style="text-align:center;padding:10px;background:#fef3c7;color:#92400e;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Loaded from Google Sheets (' + rows.length + ')</p>';
+        rows.forEach(function(row) {
+          var obj = {}; headers.forEach(function(h, i) { obj[h] = row[i]; });
+          html += '<div class="admin-order-row"><span class="ao-id">' + (obj.orderId||'') + '</span> <span class="ao-name">' + (obj.name||'Client') + '</span> <span class="ao-svc">' + (obj.service||'') + '</span><div class="ao-meta"><span>📧 ' + (obj.email||'') + '</span><span>📱 ' + (obj.phone||'') + '</span><span>💰 ₹' + (obj.amountPaid||'0') + '</span></div></div>';
+        });
+        list.innerHTML = html;
+      } else {
+        list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found.</p></div>';
+      }
+    }).catch(function() { list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Both Firestore and Sheets failed.</p></div>'; });
+  }, 8000);
+
   db.collection('orders').limit(300).get().then(function(all) {
+    clearTimeout(timeout);
     var docs = all.docs;
     console.log('✅ Firestore orders loaded:', docs.length);
     if (filterVal) docs = docs.filter(function(d) { return (d.data().status || 'Pending') === filterVal; });
@@ -2625,9 +2646,9 @@ function updateOrderStatus(docId, newStatus, selectEl) {
   // ── FILE UPLOAD TO FIREBASE STORAGE ──
   async function uploadFileToDrive(file, orderId, name) {
     try {
-      if (typeof storage === 'undefined') {
+      if (typeof storage === 'undefined' || !firebaseReady) {
         console.error('Firebase Storage not available');
-        showToast('File upload unavailable', '❌');
+        showToast('File upload unavailable - Firebase not ready', '❌');
         return '';
       }
 
@@ -2638,27 +2659,35 @@ function updateOrderStatus(docId, newStatus, selectEl) {
       const storageRef = firebase.storage().ref(filePath);
       const uploadTask = storageRef.put(file);
       
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve) => {
+        const uploadTimeout = setTimeout(() => {
+          console.error('❌ File upload timeout (15s)');
+          showToast('File upload timed out - order will continue without file', '⚠️', 4000);
+          resolve('');
+        }, 15000);
+
         uploadTask.then(async (snapshot) => {
+          clearTimeout(uploadTimeout);
           try {
             const downloadURL = await snapshot.ref.getDownloadURL();
             console.log('✅ File uploaded successfully:', downloadURL);
-            showToast('File uploaded to Drive!', '☁️', 3000);
+            showToast('File uploaded!', '☁️', 3000);
             resolve(downloadURL);
           } catch (urlErr) {
             console.error('❌ Failed to get download URL:', urlErr);
-            showToast('File upload failed', '❌', 3000);
+            showToast('File uploaded but URL failed', '⚠️', 3000);
             resolve('');
           }
         }).catch((error) => {
+          clearTimeout(uploadTimeout);
           console.error('❌ Upload failed:', error);
-          showToast('File upload failed', '❌', 3000);
+          showToast('File upload failed: ' + (error.message || 'unknown error'), '❌', 4000);
           resolve('');
         });
       });
     } catch (err) {
       console.error('❌ File upload error:', err);
-      showToast('File upload failed', '❌', 3000);
+      showToast('File upload error', '❌', 3000);
       return '';
     }
   }
