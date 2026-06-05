@@ -2457,6 +2457,9 @@ const auth    = firebase.auth();
 const db      = firebase.firestore();
 const storage = firebase.storage();
 
+console.log('✅ Firebase initialized');
+console.log('Auth:', typeof auth, 'DB:', typeof db);
+
 // ── AUTH STATE LISTENER ──────────────────────────
 auth.onAuthStateChanged(user => {
   const loginBtn = document.getElementById('navLoginBtn');
@@ -2547,25 +2550,46 @@ async function doLogin() {
   const pass  = document.getElementById('loginPassword').value;
   if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
   
+  if (typeof auth === 'undefined') {
+    showAuthErr('login', 'Firebase not loaded. Try: Ctrl+Shift+R to refresh, or check internet.');
+    return;
+  }
+  
   const btn = document.querySelector('#paneLogin .auth-submit');
   if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
   
   try {
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Login timeout (15s)')), 15000)
-    );
-    const loginPromise = auth.signInWithEmailAndPassword(email, pass);
-    await Promise.race([loginPromise, timeoutPromise]);
-    
+    await auth.signInWithEmailAndPassword(email, pass);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
-    // Auth state listener will show user button - no need to call openDashboard here
   } catch(e) {
-    console.error('Login error:', e.message);
-    showAuthErr('login', friendlyAuthError(e.code));
+    console.error('Login error:', e.code, e.message);
+    showAuthErr('login', friendlyAuthError(e.code) + ' (code: ' + e.code + ')');
     if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
   }
 }
+
+// Check Firebase loaded on page load
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    if (typeof auth === 'undefined') {
+      console.error('❌ Firebase Auth not loaded! Check your internet connection.');
+    } else {
+      console.log('✅ Firebase Auth ready');
+    }
+  }, 3000);
+});
+
+// Debug: type checkFirebase() in console to verify
+window.checkFirebase = function() {
+  console.log('firebase:', typeof firebase);
+  console.log('firebase.auth:', typeof firebase?.auth);
+  console.log('auth:', typeof auth);
+  console.log('db:', typeof db);
+  if (typeof auth !== 'undefined') {
+    auth.signInWithEmailAndPassword('test@test.com', 'wrong').catch(e => console.log('Auth working, error expected:', e.code));
+  }
+};
 
 // Debug function - run in console after login: checkAdmin()
 function checkAdmin() {
