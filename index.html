@@ -2008,8 +2008,13 @@
   async function sendOrderEmails(order) {
     const results = { admin: false, client: false };
     
+    console.log('📧 Starting email send for order:', order.orderId);
+    console.log('📧 EmailJS User ID: ntjRszAyP7FaoFO1A');
+    console.log('📧 Admin Template: template_oh8jcxn, Client Template: template_zp83lus');
+
     // Send to admin first
     try {
+      console.log('📤 Sending admin email...');
       const adminResult = await emailjs.send('service_xgx967g', ADMIN_TEMPLATE_ID, {
         order_id:     order.orderId,
         client_name:  order.name,
@@ -2025,14 +2030,15 @@
         timestamp:    new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
       });
       results.admin = true;
-      console.log('✅ Admin email sent:', adminResult);
+      console.log('✅ Admin email sent successfully');
     } catch (adminErr) {
       console.error('❌ Admin email failed:', adminErr);
-      alert('⚠️ Admin email failed. Check EmailJS template settings.');
+      showToast('⚠️ Admin email failed - check EmailJS template "template_oh8jcxn"', '❌', 8000);
     }
 
     // Send to client
     try {
+      console.log('📤 Sending client email to:', order.email);
       const clientResult = await emailjs.send('service_xgx967g', CLIENT_TEMPLATE_ID, {
         to_name:     order.name,
         to_email:    order.email,
@@ -2041,21 +2047,25 @@
         amount_paid: order.amountPaid
       });
       results.client = true;
-      console.log('✅ Client email sent to:', order.email, clientResult);
+      console.log('✅ Client email sent successfully');
     } catch (clientErr) {
       console.error('❌ Client email failed:', clientErr);
-      alert('⚠️ Client confirmation email failed. Check EmailJS template "template_zp83lus" settings.\n\nMake sure the template has "To Email" set to {{to_email}}');
+      showToast('⚠️ Your confirmation email failed - check template "template_zp83lus"', '❌', 8000);
     }
 
     // Show notification
     if (results.admin && results.client) {
       showToast('✅ Emails sent to ' + order.email + ' and admin!', '📧', 5000);
     } else if (results.admin) {
-      showToast('✅ Admin notified. Check spam for your confirmation.', '📧', 5000);
+      showToast('✅ Admin notified. Check spam for your email.', '📧', 5000);
     } else if (results.client) {
       showToast('✅ Your confirmation sent. Admin will be notified.', '📧', 5000);
     } else {
-      showToast('Order placed! Check WhatsApp for confirmation.', '⚠️', 6000);
+      // Both failed - open WhatsApp as fallback
+      showToast('📧 Email failed. Opening WhatsApp for order confirmation...', '💬', 5000);
+      setTimeout(() => {
+        notifyOnWhatsApp();
+      }, 2000);
     }
     
     return results;
