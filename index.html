@@ -2478,12 +2478,13 @@ auth.onAuthStateChanged(async user => {
 
     // Show admin tabs for admin email
     const isAdmin = user.email === 'najarzain5@gmail.com';
+    console.log('Auth state: user=', user.email, 'isAdmin=', isAdmin);
     const adminTab = document.getElementById('adminTab');
     const expertAdminTab = document.getElementById('expertAdminTab');
     const adminChatTab = document.getElementById('adminChatTab');
-    if (adminTab) adminTab.style.display = isAdmin ? 'block' : 'none';
-    if (expertAdminTab) expertAdminTab.style.display = isAdmin ? 'block' : 'none';
-    if (adminChatTab) adminChatTab.style.display = isAdmin ? 'block' : 'none';
+    if (adminTab) { adminTab.style.display = isAdmin ? 'flex' : 'none'; console.log('adminTab display:', adminTab.style.display); }
+    if (expertAdminTab) expertAdminTab.style.display = isAdmin ? 'flex' : 'none';
+    if (adminChatTab) adminChatTab.style.display = isAdmin ? 'flex' : 'none';
 
     // Auto-fill order forms
     autoFillForms(user, prof);
@@ -2545,8 +2546,23 @@ async function doLogin() {
     await auth.signInWithEmailAndPassword(email, pass);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
+    setTimeout(() => openDashboard(), 500);
   } catch(e) {
     showAuthErr('login', friendlyAuthError(e.code));
+  }
+}
+
+// Debug function - run in console after login: checkAdmin()
+function checkAdmin() {
+  const user = auth.currentUser;
+  console.log('Current user:', user?.email);
+  console.log('Is admin:', user?.email === 'najarzain5@gmail.com');
+  const adminTab = document.getElementById('adminTab');
+  console.log('Admin tab element:', adminTab);
+  console.log('Admin tab display:', adminTab?.style.display);
+  if (user?.email === 'najarzain5@gmail.com' && adminTab) {
+    adminTab.style.display = 'flex';
+    console.log('Forced admin tab to visible');
   }
 }
 
