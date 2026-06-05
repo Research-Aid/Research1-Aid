@@ -1912,6 +1912,98 @@ try {
   var st = document.getElementById('fbStatus');
   if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed: ' + e.message; }
 }
+
+if (firebaseReady && auth) {
+  auth.onAuthStateChanged(function(user) {
+    var loginBtn = document.getElementById('navLoginBtn');
+    var userBtn  = document.getElementById('navUserBtn');
+    var avatar   = document.getElementById('navAvatar');
+    var uname    = document.getElementById('navUserName');
+    if (user) {
+      var displayName = user.displayName || user.email.split('@')[0];
+      var initial = displayName.charAt(0).toUpperCase();
+      loginBtn.style.display = 'none';
+      userBtn.style.display  = 'flex';
+      avatar.textContent     = initial;
+      uname.textContent      = displayName.split(' ')[0];
+      var isAdmin = user.email === 'najarzain5@gmail.com';
+      var adminTab = document.getElementById('adminTab');
+      var expertAdminTab = document.getElementById('expertAdminTab');
+      var adminChatTab = document.getElementById('adminChatTab');
+      var adminFilesTab = document.getElementById('adminFilesTab');
+      if (adminTab) adminTab.style.display = isAdmin ? 'flex' : 'none';
+      if (expertAdminTab) expertAdminTab.style.display = isAdmin ? 'flex' : 'none';
+      if (adminChatTab) adminChatTab.style.display = isAdmin ? 'flex' : 'none';
+      if (adminFilesTab) adminFilesTab.style.display = isAdmin ? 'flex' : 'none';
+      db.collection('users').doc(user.uid).get().then(function(snap) {
+        var prof = snap.exists ? snap.data() : {};
+        var set = function(id, val) { var el = document.getElementById(id); if (el && val) el.value = val; };
+        set('fullName', prof.name || user.displayName || '');
+        set('email', user.email || '');
+        set('phone', prof.phone || '');
+        set('university', prof.college || '');
+        set('svcName', prof.name || user.displayName || '');
+        set('svcEmail', user.email || '');
+        set('svcPhone', prof.phone || '');
+        set('svcUniversity', prof.college || '');
+        set('exFullName', prof.name || user.displayName || '');
+        set('exEmail', user.email || '');
+        set('exPhone', prof.phone || '');
+      }).catch(function(e) { console.error('Profile fetch failed:', e); });
+    } else {
+      loginBtn.style.display = '';
+      userBtn.style.display  = 'none';
+      var adminTab = document.getElementById('adminTab');
+      var expertAdminTab = document.getElementById('expertAdminTab');
+      var expertTab = document.getElementById('expertTab');
+      var adminChatTab = document.getElementById('adminChatTab');
+      var adminFilesTab = document.getElementById('adminFilesTab');
+      if (adminTab) adminTab.style.display = 'none';
+      if (expertAdminTab) expertAdminTab.style.display = 'none';
+      if (expertTab) expertTab.style.display = 'none';
+      if (adminChatTab) adminChatTab.style.display = 'none';
+      if (adminFilesTab) adminFilesTab.style.display = 'none';
+    }
+  });
+}
+
+function openDashboard() {
+  if (!firebaseReady || !auth) return alert('Firebase not ready. Press Ctrl+Shift+R.');
+  var user = auth.currentUser;
+  if (!user) return openAuthModal();
+  document.getElementById('dashOverlay').classList.add('open');
+  document.getElementById('dashPanel').classList.add('open');
+  var name = user.displayName || user.email.split('@')[0];
+  var init = name.charAt(0).toUpperCase();
+  document.getElementById('dashAvatar').textContent = init;
+  document.getElementById('dashName').textContent   = name;
+  document.getElementById('dashEmail').textContent  = user.email;
+  document.getElementById('pName').textContent    = name;
+  document.getElementById('pEmail').textContent   = user.email;
+  if (typeof loadDashOrders === 'function') loadDashOrders(user.uid);
+  if (typeof loadExpertProfile === 'function') loadExpertProfile(user.email);
+  db.collection('users').doc(user.uid).get().then(function(snap) {
+    var prof = snap.exists ? snap.data() : {};
+    document.getElementById('pPhone').textContent   = prof.phone   || 'Not set';
+    document.getElementById('pCollege').textContent = prof.college || 'Not set';
+    document.getElementById('pSince').textContent   = prof.createdAt
+      ? new Date(prof.createdAt.seconds * 1000).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
+      : 'N/A';
+  }).catch(function(e) { console.error('Profile load error:', e); });
+}
+
+function closeDashboard() {
+  document.getElementById('dashOverlay').classList.remove('open');
+  document.getElementById('dashPanel').classList.remove('open');
+}
+
+function doLogout() {
+  if (!auth) return;
+  auth.signOut().then(function() {
+    closeDashboard();
+    showToast('Logged out successfully.', '👋');
+  });
+}
 </script>
 <script>
   const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwRtvLwBXRBKT_n7FMrqpF0Hh72v9S4-Z-WaixvtoaQxBFzYfaHXKgblp_1p0VwCAlv/exec';
@@ -2590,136 +2682,10 @@ try {
 </script>
 
 <script>
-// ── AUTH STATE LISTENER ──────────────────────────
-if (firebaseReady && auth) {
-auth.onAuthStateChanged(user => {
-  const loginBtn = document.getElementById('navLoginBtn');
-  const userBtn  = document.getElementById('navUserBtn');
-  const avatar   = document.getElementById('navAvatar');
-  const uname    = document.getElementById('navUserName');
-
-  if (user) {
-    const displayName = user.displayName || user.email.split('@')[0];
-    const initial     = displayName.charAt(0).toUpperCase();
-
-    loginBtn.style.display = 'none';
-    userBtn.style.display  = 'flex';
-    avatar.textContent     = initial;
-    uname.textContent      = displayName.split(' ')[0];
-
-    // Show admin tabs for admin email (non-blocking)
-    const isAdmin = user.email === 'najarzain5@gmail.com';
-    console.log('Auth state: user=', user.email, 'isAdmin=', isAdmin);
-    const adminTab = document.getElementById('adminTab');
-    const expertAdminTab = document.getElementById('expertAdminTab');
-    const adminChatTab = document.getElementById('adminChatTab');
-    if (adminTab) { adminTab.style.display = isAdmin ? 'flex' : 'none'; }
-    if (expertAdminTab) expertAdminTab.style.display = isAdmin ? 'flex' : 'none';
-    if (adminChatTab) adminChatTab.style.display = isAdmin ? 'flex' : 'none';
-    const adminFilesTab = document.getElementById('adminFilesTab');
-    if (adminFilesTab) adminFilesTab.style.display = isAdmin ? 'flex' : 'none';
-
-    // Fetch profile non-blocking (don't await in listener) - with timeout
-    const profileTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timeout')), 8000)
-    );
-    Promise.race([
-      db.collection('users').doc(user.uid).get(),
-      profileTimeout
-    ]).then(snap => {
-      const prof = snap.exists ? snap.data() : {};
-      autoFillForms(user, prof);
-    }).catch(e => console.error('Profile fetch failed:', e.message));
-  } else {
-    loginBtn.style.display = '';
-    userBtn.style.display  = 'none';
-    const adminTab = document.getElementById('adminTab');
-    const expertAdminTab = document.getElementById('expertAdminTab');
-    const expertTab = document.getElementById('expertTab');
-    const adminChatTab = document.getElementById('adminChatTab');
-    if (adminTab) adminTab.style.display = 'none';
-    if (expertAdminTab) expertAdminTab.style.display = 'none';
-    if (expertTab) expertTab.style.display = 'none';
-    if (adminChatTab) adminChatTab.style.display = 'none';
-    const adminFilesTab = document.getElementById('adminFilesTab');
-    if (adminFilesTab) adminFilesTab.style.display = 'none';
-  }
-});
-} else {
-  console.warn('⚠️ Auth listener skipped - Firebase not ready');
-}
+// ── AUTH STATE LISTENER & DASHBOARD (duplicated from init block for safety) ──
 
 // Public team section
-if (firebaseReady) loadPublicExperts();
-
-// ── AUTO-FILL FORMS ──────────────────────────────
-function autoFillForms(user, prof) {
-  const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
-  set('fullName',    prof.name  || user.displayName || '');
-  set('email',       user.email || '');
-  set('phone',       prof.phone || '');
-  set('university',  prof.college || '');
-  set('svcName',     prof.name  || user.displayName || '');
-  set('svcEmail',    user.email || '');
-  set('svcPhone',    prof.phone || '');
-  set('svcUniversity', prof.college || '');
-  set('exFullName',  prof.name  || user.displayName || '');
-  set('exEmail',     user.email || '');
-  set('exPhone',     prof.phone || '');
-}
-
-// ── AUTH MODAL (defined in first script block) ──
-
-// Check Firebase loaded on page load
-window.addEventListener('load', () => {
-  setTimeout(() => {
-    if (!firebaseReady) {
-      console.error('❌ Firebase not loaded! Check internet or browser console (F12).');
-      const st = document.getElementById('fbStatus');
-      if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Press Ctrl+Shift+R or check console (F12).'; }
-    } else {
-      console.log('✅ Firebase Auth ready');
-    }
-  }, 3000);
-});
-
-// Debug: type checkFirebase() in console to verify
-window.checkFirebase = function() {
-  console.log('firebase global:', typeof firebase);
-  console.log('firebaseReady:', firebaseReady);
-  console.log('auth:', typeof auth, auth ? 'exists' : 'undefined');
-  console.log('db:', typeof db, db ? 'exists' : 'undefined');
-  console.log('storage:', typeof storage, storage ? 'exists' : 'undefined');
-  if (auth) {
-    console.log('currentUser:', auth.currentUser?.email || 'none');
-    auth.signInWithEmailAndPassword('test@test.com', 'wrong').catch(e => {
-      console.log('Auth API test - error expected:', e.code, e.message);
-    });
-  } else {
-    console.error('auth is undefined! Firebase SDK likely did not load.');
-  }
-};
-
-// Debug function - run in console after login: checkAdmin()
-function checkAdmin() {
-  if (!auth) return console.error('Auth not initialized');
-  const user = auth.currentUser;
-  console.log('Current user:', user?.email);
-  console.log('Is admin:', user?.email === 'najarzain5@gmail.com');
-  const adminTab = document.getElementById('adminTab');
-  console.log('Admin tab element:', adminTab);
-  console.log('Admin tab display:', adminTab?.style.display);
-  if (user?.email === 'najarzain5@gmail.com' && adminTab) {
-    adminTab.style.display = 'flex';
-    console.log('Forced admin tab to visible');
-  }
-}
-
-async function doLogout() {
-  await auth.signOut();
-  closeDashboard();
-  showToast('Logged out successfully.', '👋');
-}
+if (firebaseReady && typeof loadPublicExperts === 'function') loadPublicExperts();
 
 async function waitForAuthUser(timeoutMs = 5000) {
   if (auth.currentUser) return auth.currentUser;
@@ -2823,49 +2789,7 @@ function normalizeOrderRecord(o, id = '') {
   };
 }
 
-// ── DASHBOARD ─────────────────────────────────────
-function openDashboard() {
-  const user = auth.currentUser;
-  if (!user) return openAuthModal();
-
-  document.getElementById('dashOverlay').classList.add('open');
-  document.getElementById('dashPanel').classList.add('open');
-
-  // Set basic info immediately (non-blocking)
-  const name = user.displayName || user.email.split('@')[0];
-  const init = name.charAt(0).toUpperCase();
-  
-  document.getElementById('dashAvatar').textContent = init;
-  document.getElementById('dashName').textContent   = name;
-  document.getElementById('dashEmail').textContent  = user.email;
-  document.getElementById('pName').textContent    = name;
-  document.getElementById('pEmail').textContent   = user.email;
-
-  // Load profile in background (non-blocking) - with timeout
-  const dashProfileTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Dashboard profile timeout')), 8000)
-  );
-  Promise.race([
-    db.collection('users').doc(user.uid).get(),
-    dashProfileTimeout
-  ]).then(snap => {
-    const prof = snap.exists ? snap.data() : {};
-    document.getElementById('pPhone').textContent   = prof.phone   || 'Not set';
-    document.getElementById('pCollege').textContent = prof.college || 'Not set';
-    document.getElementById('pSince').textContent   = prof.createdAt
-      ? new Date(prof.createdAt.seconds * 1000).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'})
-      : 'N/A';
-  }).catch(e => console.error('Profile load error:', e.message));
-
-  // Load orders + expert profile (non-blocking)
-  loadDashOrders(user.uid);
-  loadExpertProfile(user.email);
-}
-
-function closeDashboard() {
-  document.getElementById('dashOverlay').classList.remove('open');
-  document.getElementById('dashPanel').classList.remove('open');
-}
+// ── DASHBOARD (openDashboard/closeDashboard in init script block) ──
 
 function switchDashTab(tab, el) {
   document.querySelectorAll('.dash-tab').forEach(t => t.classList.remove('active'));
