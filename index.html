@@ -2546,13 +2546,24 @@ async function doLogin() {
   const email = document.getElementById('loginEmail').value.trim();
   const pass  = document.getElementById('loginPassword').value;
   if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
+  
+  const btn = document.querySelector('#paneLogin .auth-submit');
+  if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
+  
   try {
-    await auth.signInWithEmailAndPassword(email, pass);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Login timeout (15s)')), 15000)
+    );
+    const loginPromise = auth.signInWithEmailAndPassword(email, pass);
+    await Promise.race([loginPromise, timeoutPromise]);
+    
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
     setTimeout(() => openDashboard(), 500);
   } catch(e) {
+    console.error('Login error:', e.message);
     showAuthErr('login', friendlyAuthError(e.code));
+    if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
   }
 }
 
@@ -2578,6 +2589,10 @@ async function doSignup() {
   const pass    = document.getElementById('signupPassword').value;
   if (!name || !email || !pass) return showAuthErr('signup','Name, email and password are required.');
   if (pass.length < 6) return showAuthErr('signup','Password must be at least 6 characters.');
+  
+  const btn = document.querySelector('#paneSignup .auth-submit');
+  if (btn) { btn.textContent = '⏳ Creating account...'; btn.disabled = true; }
+  
   try {
     const cred = await auth.createUserWithEmailAndPassword(email, pass);
     await cred.user.updateProfile({ displayName: name });
@@ -2589,6 +2604,7 @@ async function doSignup() {
     showToast(`Account created! Welcome, ${name.split(' ')[0]} 🎉`, '✅', 4000);
   } catch(e) {
     showAuthErr('signup', friendlyAuthError(e.code));
+    if (btn) { btn.textContent = 'Create My Account'; btn.disabled = false; }
   }
 }
 
