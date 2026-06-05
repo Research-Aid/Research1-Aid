@@ -2279,37 +2279,40 @@
   // ── FILE UPLOAD TO FIREBASE STORAGE ──
   async function uploadFileToDrive(file, orderId, name) {
     try {
+      if (typeof storage === 'undefined') {
+        console.error('Firebase Storage not available');
+        showToast('File upload unavailable', '❌');
+        return '';
+      }
+
       console.log('☁️ Starting file upload:', file.name, file.size, 'bytes');
-      const ext = file.name.split('.').pop();
       const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_').substring(0, 50);
       const filePath = `orders/${orderId}/${safeName}`;
-      const storageRef = storage.ref(filePath);
+      
+      const storageRef = firebase.storage().ref(filePath);
       const uploadTask = storageRef.put(file);
       
       return new Promise((resolve, reject) => {
-        uploadTask.on('state_changed',
-          (snapshot) => {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes * 100).toFixed(0);
-            console.log('📤 Upload progress:', progress + '%');
-          },
-          (error) => {
-            console.error('❌ Upload failed:', error);
-            resolve(''); // Return empty on error, don't block order
-          },
-          async () => {
-            try {
-              const downloadURL = await uploadTask.snapshot.ref.getDownloadURL();
-              console.log('✅ File uploaded successfully:', downloadURL);
-              resolve(downloadURL);
-            } catch (urlErr) {
-              console.error('❌ Failed to get download URL:', urlErr);
-              resolve('');
-            }
+        uploadTask.then(async (snapshot) => {
+          try {
+            const downloadURL = await snapshot.ref.getDownloadURL();
+            console.log('✅ File uploaded successfully:', downloadURL);
+            showToast('File uploaded to Drive!', '☁️', 3000);
+            resolve(downloadURL);
+          } catch (urlErr) {
+            console.error('❌ Failed to get download URL:', urlErr);
+            showToast('File upload failed', '❌', 3000);
+            resolve('');
           }
-        );
+        }).catch((error) => {
+          console.error('❌ Upload failed:', error);
+          showToast('File upload failed', '❌', 3000);
+          resolve('');
+        });
       });
     } catch (err) {
       console.error('❌ File upload error:', err);
+      showToast('File upload failed', '❌', 3000);
       return '';
     }
   }
@@ -2564,24 +2567,13 @@ async function doLogin() {
   const btn = document.querySelector('#paneLogin .auth-submit');
   if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
 
-  // Safety timeout for Firebase auth call
-  const loginTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Login timeout - Firebase may be slow or unavailable')), 15000)
-  );
-
   try {
-    await Promise.race([
-      auth.signInWithEmailAndPassword(email, pass),
-      loginTimeout
-    ]);
+    await auth.signInWithEmailAndPassword(email, pass);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
   } catch(e) {
     console.error('Login error:', e.code, e.message);
-    const errMsg = e.message?.includes('timeout')
-      ? 'Login timed out. Check your internet connection and try again.'
-      : friendlyAuthError(e.code) + ' (code: ' + e.code + ')';
-    showAuthErr('login', errMsg);
+    showAuthErr('login', friendlyAuthError(e.code));
     if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
   }
 }
@@ -2634,80 +2626,39 @@ async function doSignup() {
   const btn = document.querySelector('#paneSignup .auth-submit');
   if (btn) { btn.textContent = '⏳ Creating account...'; btn.disabled = true; }
 
-  const signupTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Signup timeout')), 15000)
-  );
-
   try {
-    const cred = await Promise.race([
-      auth.createUserWithEmailAndPassword(email, pass),
-      signupTimeout
-    ]);
-    const profileTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile update timeout')), 8000)
-    );
-    await Promise.race([
-      cred.user.updateProfile({ displayName: name }),
-      profileTimeout
-    ]);
-    const dbTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Database save timeout')), 8000)
-    );
-    await Promise.race([
-      db.collection('users').doc(cred.user.uid).set({
-        name, email, phone, college,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      }),
-      dbTimeout
-    ]);
+    const cred = await auth.createUserWithEmailAndPassword(email, pass);
+    await cred.user.updateProfile({ displayName: name });
+    await db.collection('users').doc(cred.user.uid).set({
+      name, email, phone, college,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
     closeAuthModal();
     showToast(`Account created! Welcome, ${name.split(' ')[0]} 🎉`, '✅', 4000);
   } catch(e) {
-    const errMsg = e.message?.includes('timeout')
-      ? 'Signup timed out. Please try again.'
-      : friendlyAuthError(e.code);
-    showAuthErr('signup', errMsg);
+    showAuthErr('signup', friendlyAuthError(e.code));
     if (btn) { btn.textContent = 'Create My Account'; btn.disabled = false; }
   }
 }
 
 async function doGoogleSignIn() {
   const provider = new firebase.auth.GoogleAuthProvider();
-  const googleTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Google sign-in timeout')), 15000)
-  );
-
   try {
-    const cred = await Promise.race([
-      auth.signInWithPopup(provider),
-      googleTimeout
-    ]);
+    const cred = await auth.signInWithPopup(provider);
     const user = cred.user;
-    const dbTimeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Database timeout')), 8000)
-    );
-    const snap = await Promise.race([
-      db.collection('users').doc(user.uid).get(),
-      dbTimeout
-    ]);
+    const snap = await db.collection('users').doc(user.uid).get();
     if (!snap.exists) {
-      await Promise.race([
-        db.collection('users').doc(user.uid).set({
-          name:  user.displayName || '',
-          email: user.email || '',
-          phone: '', college: '',
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        }),
-        dbTimeout
-      ]);
+      await db.collection('users').doc(user.uid).set({
+        name:  user.displayName || '',
+        email: user.email || '',
+        phone: '', college: '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
     }
     closeAuthModal();
     showToast(`Welcome, ${(user.displayName||'').split(' ')[0] || 'Scholar'}! 👋`, '✅');
   } catch(e) {
-    const errMsg = e.message?.includes('timeout')
-      ? 'Google sign-in timed out. Please try again.'
-      : friendlyAuthError(e.code);
-    showAuthErr('login', errMsg);
+    showAuthErr('login', friendlyAuthError(e.code));
   }
 }
 
