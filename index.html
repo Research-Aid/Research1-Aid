@@ -2447,7 +2447,17 @@
 ══════════════════════════════════════════════════ */
 let auth, db, storage;
 let firebaseReady = false;
+
+function fbDebug(msg) {
+  console.log('[FB-DEBUG]', msg);
+  const box = document.getElementById('fbDebugBox');
+  if (box) { box.style.display = 'block'; box.innerHTML += msg + '<br>'; }
+}
+
 try {
+  if (typeof firebase === 'undefined') throw new Error('Firebase SDK script did not load');
+  if (!firebase.app) throw new Error('firebase.app not available');
+  
   const firebaseConfig = {
     apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
     authDomain:        "research-aid-ff2eb.firebaseapp.com",
@@ -2463,10 +2473,10 @@ try {
   db      = firebase.firestore();
   storage = firebase.storage();
 
-  console.log('✅ Firebase initialized');
-  console.log('Auth:', typeof auth, 'DB:', typeof db);
+  fbDebug('✅ Firebase init OK. auth=' + typeof auth + ' db=' + typeof db);
   firebaseReady = true;
 } catch(e) {
+  fbDebug('❌ Firebase INIT FAILED: ' + e.message);
   console.error('❌ Firebase init failed:', e);
   const st = document.getElementById('fbStatus');
   if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Error: ' + e.message; }
@@ -2572,8 +2582,12 @@ async function doLogin() {
   const pass  = document.getElementById('loginPassword').value;
   if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
   
+  fbDebug('Login attempt: ' + email);
+  fbDebug('firebaseReady=' + firebaseReady + ' auth=' + typeof auth);
+  
   if (!firebaseReady || typeof auth === 'undefined') {
-    showAuthErr('login', 'Firebase not ready. Press Ctrl+Shift+R to hard-refresh. If still failing, check internet or open browser console (F12) for details.');
+    fbDebug('BLOCKED: Firebase not ready');
+    showAuthErr('login', 'Firebase not ready. Press Ctrl+Shift+R to hard-refresh.');
     return;
   }
   
@@ -2581,11 +2595,13 @@ async function doLogin() {
   if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
 
   try {
+    fbDebug('Calling signInWithEmailAndPassword...');
     const result = await auth.signInWithEmailAndPassword(email, pass);
-    console.log('✅ Login success:', result.user.email);
+    fbDebug('✅ Login SUCCESS: ' + result.user.email);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
   } catch(e) {
+    fbDebug('❌ Login FAILED: code=' + e.code + ' msg=' + e.message);
     console.error('Login error:', e.code, e.message);
     showAuthErr('login', friendlyAuthError(e.code, e.message));
     if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
@@ -4041,6 +4057,7 @@ async function updateOrderStatus(docId, newStatus, selectEl) {
 
     <!-- LOGIN -->
     <div class="auth-pane active" id="paneLogin">
+      <div id="fbDebugBox" style="display:none;background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#92400e;word-break:break-all;max-height:120px;overflow-y:auto"></div>
       <div class="auth-field"><label>Email Address</label><input type="email" id="loginEmail" placeholder="your@email.com" /></div>
       <div class="auth-field"><label>Password</label><input type="password" id="loginPassword" placeholder="••••••••" /></div>
       <p id="loginErr" class="auth-err"></p>
