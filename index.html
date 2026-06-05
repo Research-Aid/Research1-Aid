@@ -1888,7 +1888,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-
+<div id="fbStatus" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;padding:10px;text-align:center;font-size:14px;font-weight:700"></div>
 <script>
   const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwRtvLwBXRBKT_n7FMrqpF0Hh72v9S4-Z-WaixvtoaQxBFzYfaHXKgblp_1p0VwCAlv/exec';
   emailjs.init('ntjRszAyP7FaoFO1A');
@@ -2445,25 +2445,35 @@
    Go to: console.firebase.google.com
    → Your Project → Project Settings → Your Apps → Config
 ══════════════════════════════════════════════════ */
-const firebaseConfig = {
-  apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
-  authDomain:        "research-aid-ff2eb.firebaseapp.com",
-  projectId:         "research-aid-ff2eb",
-  storageBucket:     "research-aid-ff2eb.firebasestorage.app",
-  messagingSenderId: "301229801288",
-  appId:             "1:301229801288:web:fb148d7942d8e901513d7d",
-  measurementId:     "G-E899JK0CVQ"
-};
+let auth, db, storage;
+let firebaseReady = false;
+try {
+  const firebaseConfig = {
+    apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
+    authDomain:        "research-aid-ff2eb.firebaseapp.com",
+    projectId:         "research-aid-ff2eb",
+    storageBucket:     "research-aid-ff2eb.firebasestorage.app",
+    messagingSenderId: "301229801288",
+    appId:             "1:301229801288:web:fb148d7942d8e901513d7d",
+    measurementId:     "G-E899JK0CVQ"
+  };
 
-firebase.initializeApp(firebaseConfig);
-const auth    = firebase.auth();
-const db      = firebase.firestore();
-const storage = firebase.storage();
+  firebase.initializeApp(firebaseConfig);
+  auth    = firebase.auth();
+  db      = firebase.firestore();
+  storage = firebase.storage();
 
-console.log('✅ Firebase initialized');
-console.log('Auth:', typeof auth, 'DB:', typeof db);
+  console.log('✅ Firebase initialized');
+  console.log('Auth:', typeof auth, 'DB:', typeof db);
+  firebaseReady = true;
+} catch(e) {
+  console.error('❌ Firebase init failed:', e);
+  const st = document.getElementById('fbStatus');
+  if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Error: ' + e.message; }
+}
 
 // ── AUTH STATE LISTENER ──────────────────────────
+if (firebaseReady && auth) {
 auth.onAuthStateChanged(user => {
   const loginBtn = document.getElementById('navLoginBtn');
   const userBtn  = document.getElementById('navUserBtn');
@@ -2517,9 +2527,12 @@ auth.onAuthStateChanged(user => {
     if (adminFilesTab) adminFilesTab.style.display = 'none';
   }
 });
+} else {
+  console.warn('⚠️ Auth listener skipped - Firebase not ready');
+}
 
 // Public team section
-loadPublicExperts();
+if (firebaseReady) loadPublicExperts();
 
 // ── AUTO-FILL FORMS ──────────────────────────────
 function autoFillForms(user, prof) {
@@ -2559,8 +2572,8 @@ async function doLogin() {
   const pass  = document.getElementById('loginPassword').value;
   if (!email || !pass) return showAuthErr('login','Please fill in both fields.');
   
-  if (typeof auth === 'undefined') {
-    showAuthErr('login', 'Firebase not loaded. Try: Ctrl+Shift+R to refresh, or check internet.');
+  if (!firebaseReady || typeof auth === 'undefined') {
+    showAuthErr('login', 'Firebase not ready. Press Ctrl+Shift+R to hard-refresh. If still failing, check internet or open browser console (F12) for details.');
     return;
   }
   
@@ -2568,12 +2581,13 @@ async function doLogin() {
   if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
 
   try {
-    await auth.signInWithEmailAndPassword(email, pass);
+    const result = await auth.signInWithEmailAndPassword(email, pass);
+    console.log('✅ Login success:', result.user.email);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
   } catch(e) {
     console.error('Login error:', e.code, e.message);
-    showAuthErr('login', friendlyAuthError(e.code));
+    showAuthErr('login', friendlyAuthError(e.code, e.message));
     if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
   }
 }
@@ -2581,8 +2595,10 @@ async function doLogin() {
 // Check Firebase loaded on page load
 window.addEventListener('load', () => {
   setTimeout(() => {
-    if (typeof auth === 'undefined') {
-      console.error('❌ Firebase Auth not loaded! Check your internet connection.');
+    if (!firebaseReady) {
+      console.error('❌ Firebase not loaded! Check internet or browser console (F12).');
+      const st = document.getElementById('fbStatus');
+      if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Press Ctrl+Shift+R or check console (F12).'; }
     } else {
       console.log('✅ Firebase Auth ready');
     }
@@ -2591,17 +2607,24 @@ window.addEventListener('load', () => {
 
 // Debug: type checkFirebase() in console to verify
 window.checkFirebase = function() {
-  console.log('firebase:', typeof firebase);
-  console.log('firebase.auth:', typeof firebase?.auth);
-  console.log('auth:', typeof auth);
-  console.log('db:', typeof db);
-  if (typeof auth !== 'undefined') {
-    auth.signInWithEmailAndPassword('test@test.com', 'wrong').catch(e => console.log('Auth working, error expected:', e.code));
+  console.log('firebase global:', typeof firebase);
+  console.log('firebaseReady:', firebaseReady);
+  console.log('auth:', typeof auth, auth ? 'exists' : 'undefined');
+  console.log('db:', typeof db, db ? 'exists' : 'undefined');
+  console.log('storage:', typeof storage, storage ? 'exists' : 'undefined');
+  if (auth) {
+    console.log('currentUser:', auth.currentUser?.email || 'none');
+    auth.signInWithEmailAndPassword('test@test.com', 'wrong').catch(e => {
+      console.log('Auth API test - error expected:', e.code, e.message);
+    });
+  } else {
+    console.error('auth is undefined! Firebase SDK likely did not load.');
   }
 };
 
 // Debug function - run in console after login: checkAdmin()
 function checkAdmin() {
+  if (!auth) return console.error('Auth not initialized');
   const user = auth.currentUser;
   console.log('Current user:', user?.email);
   console.log('Is admin:', user?.email === 'najarzain5@gmail.com');
@@ -2622,6 +2645,7 @@ async function doSignup() {
   const pass    = document.getElementById('signupPassword').value;
   if (!name || !email || !pass) return showAuthErr('signup','Name, email and password are required.');
   if (pass.length < 6) return showAuthErr('signup','Password must be at least 6 characters.');
+  if (!firebaseReady || !auth) return showAuthErr('signup','Firebase not ready. Press Ctrl+Shift+R to refresh.');
   
   const btn = document.querySelector('#paneSignup .auth-submit');
   if (btn) { btn.textContent = '⏳ Creating account...'; btn.disabled = true; }
@@ -2636,12 +2660,13 @@ async function doSignup() {
     closeAuthModal();
     showToast(`Account created! Welcome, ${name.split(' ')[0]} 🎉`, '✅', 4000);
   } catch(e) {
-    showAuthErr('signup', friendlyAuthError(e.code));
+    showAuthErr('signup', friendlyAuthError(e.code, e.message));
     if (btn) { btn.textContent = 'Create My Account'; btn.disabled = false; }
   }
 }
 
 async function doGoogleSignIn() {
+  if (!firebaseReady || !auth) return showAuthErr('login','Firebase not ready. Press Ctrl+Shift+R to refresh.');
   const provider = new firebase.auth.GoogleAuthProvider();
   try {
     const cred = await auth.signInWithPopup(provider);
@@ -2658,18 +2683,19 @@ async function doGoogleSignIn() {
     closeAuthModal();
     showToast(`Welcome, ${(user.displayName||'').split(' ')[0] || 'Scholar'}! 👋`, '✅');
   } catch(e) {
-    showAuthErr('login', friendlyAuthError(e.code));
+    showAuthErr('login', friendlyAuthError(e.code, e.message));
   }
 }
 
 async function doResetPassword() {
+  if (!firebaseReady || !auth) return showAuthErr('login','Firebase not ready. Press Ctrl+Shift+R to refresh.');
   const email = document.getElementById('loginEmail').value.trim();
   if (!email) return showAuthErr('login','Enter your email above first.');
   try {
     await auth.sendPasswordResetEmail(email);
     showToast('Reset link sent to your email!', '📧', 4000);
   } catch(e) {
-    showAuthErr('login', friendlyAuthError(e.code));
+    showAuthErr('login', friendlyAuthError(e.code, e.message));
   }
 }
 
@@ -2679,17 +2705,23 @@ async function doLogout() {
   showToast('Logged out successfully.', '👋');
 }
 
-function friendlyAuthError(code) {
+function friendlyAuthError(code, message) {
   const map = {
-    'auth/user-not-found':       'No account found with this email.',
-    'auth/wrong-password':       'Incorrect password.',
-    'auth/email-already-in-use': 'This email is already registered.',
-    'auth/invalid-email':        'Please enter a valid email address.',
-    'auth/weak-password':        'Password must be at least 6 characters.',
-    'auth/too-many-requests':    'Too many attempts. Please wait and try again.',
-    'auth/popup-closed-by-user': 'Sign-in popup was closed.',
+    'auth/user-not-found':           'No account found with this email. Sign up first.',
+    'auth/wrong-password':           'Incorrect password. Try again or reset it.',
+    'auth/email-already-in-use':     'This email is already registered.',
+    'auth/invalid-email':            'Please enter a valid email address.',
+    'auth/weak-password':            'Password must be at least 6 characters.',
+    'auth/too-many-requests':        'Too many attempts. Please wait and try again.',
+    'auth/popup-closed-by-user':     'Sign-in popup was closed.',
+    'auth/unauthorized-domain':      'This website domain is not authorized in Firebase. Add it in Firebase Console > Authentication > Settings > Authorized domains.',
+    'auth/operation-not-allowed':    'Email/Password login is not enabled in Firebase. Enable it in Firebase Console > Authentication > Sign-in method.',
+    'auth/network-request-failed':   'Network error. Check your internet connection and try again.',
+    'auth/invalid-credential':       'Invalid email or password. Check your credentials.',
+    'auth/account-exists-with-different-credential': 'An account already exists with this email using a different sign-in method.',
+    'auth/internal-error':           'Firebase internal error. Please try again later.',
   };
-  return map[code] || 'Something went wrong. Please try again.';
+  return map[code] || 'Error: ' + (code || 'unknown') + '. ' + (message || '');
 }
 
 async function waitForAuthUser(timeoutMs = 5000) {
