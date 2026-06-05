@@ -2004,6 +2004,110 @@ function doLogout() {
     showToast('Logged out successfully.', '👋');
   });
 }
+
+function switchDashTab(tab, el) {
+  document.querySelectorAll('.dash-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelectorAll('.dash-pane').forEach(function(p) { p.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  var pane = document.getElementById('dp' + tab.charAt(0).toUpperCase() + tab.slice(1));
+  if (pane) pane.classList.add('active');
+  if (tab === 'files' && typeof loadDashFiles === 'function') loadDashFiles(auth.currentUser?.uid);
+  if (tab === 'chat' && typeof loadUserChat === 'function') loadUserChat();
+  if (tab === 'admin') loadAdminOrders();
+  if (tab === 'adminchat' && typeof loadAdminChatInbox === 'function') loadAdminChatInbox();
+  if (tab === 'expertsadmin') { if (typeof loadExpertApplications === 'function') loadExpertApplications(); if (typeof loadWorkingExperts === 'function') loadWorkingExperts(); }
+  if (tab === 'adminfiles' && typeof loadAdminFiles === 'function') loadAdminFiles();
+}
+
+function loadAdminOrders() {
+  if (!firebaseReady || !db) { console.error('loadAdminOrders: Firebase not ready'); return; }
+  var list = document.getElementById('adminOrdersList');
+  var filter = document.getElementById('adminFilterStatus');
+  var filterVal = filter ? filter.value : '';
+  if (!list) return;
+  list.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b">⏳ Loading orders...</p>';
+
+  db.collection('orders').limit(300).get().then(function(all) {
+    var docs = all.docs;
+    console.log('✅ Firestore orders loaded:', docs.length);
+    if (filterVal) docs = docs.filter(function(d) { return (d.data().status || 'Pending') === filterVal; });
+    docs.sort(function(a, b) { return (b.data().timestamp?.seconds || 0) - (a.data().timestamp?.seconds || 0); });
+
+    if (docs.length === 0) {
+      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found.</p><p style="color:#64748b;font-size:.85rem;margin-top:8px">Orders will appear here once placed.</p></div>';
+      return;
+    }
+
+    var statusCls = {'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered'};
+    var html = '<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Showing ' + docs.length + ' orders</p>';
+    docs.forEach(function(doc) {
+      var o = doc.data();
+      var id = doc.id;
+      var ts = o.timestamp && o.timestamp.seconds ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+      var status = o.status || 'Pending';
+      var cls = statusCls[status] || 'pending';
+      var name = o.name || 'Client';
+      var email = o.email || '—';
+      var phone = o.phone || '—';
+      var service = o.service || '—';
+      var amount = o.amountPaid || '0';
+      var utr = o.refNo || '—';
+      var fileLink = o.fileLink || '';
+      var requirements = o.requirements || '—';
+      var university = o.university || '—';
+      var deadline = o.deadline || '—';
+      var waLink = phone ? 'https://wa.me/' + phone.replace(/[^0-9]/g,'') : '#';
+
+      html += '<div class="admin-order-row">'
+        + '<div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:6px">'
+        + '<span class="ao-id">' + (o.orderId || id) + '</span>'
+        + '<span class="ao-status ' + cls + '">' + status + '</span>'
+        + '</div>'
+        + '<div class="ao-name">' + name + '</div>'
+        + '<div class="ao-svc">' + service + '</div>'
+        + '<div class="ao-meta">'
+        + '<span>📧 ' + email + '</span>'
+        + '<span>📱 <a href="' + waLink + '" target="_blank" style="color:#0f172a">' + phone + '</a></span>'
+        + '<span>🎓 ' + university + '</span>'
+        + '<span>⏰ ' + deadline + '</span>'
+        + '</div>'
+        + '<div class="ao-meta" style="margin-top:4px">'
+        + '<span>💰 ₹' + amount + '</span>'
+        + '<span>UTR: ' + utr + '</span>'
+        + '<span>🕐 ' + ts + '</span>'
+        + '</div>'
+        + (requirements !== '—' ? '<div style="margin-top:6px;font-size:.82rem;color:#1e293b"><strong>Requirements:</strong> ' + requirements + '</div>' : '')
+        + (fileLink ? '<div style="margin-top:4px;font-size:.82rem"><a href="' + fileLink + '" target="_blank" style="color:#4f46e5;font-weight:700">📎 View File</a></div>' : '')
+        + '<div style="margin-top:6px;display:flex;align-items:center;gap:8px">'
+        + '<select class="admin-status-select" onchange="updateOrderStatus(\'' + id + '\',this.value,this)">'
+        + '<option ' + (status==='Pending'?'selected':'') + '>Pending</option>'
+        + '<option ' + (status==='Confirmed'?'selected':'') + '>Confirmed</option>'
+        + '<option ' + (status==='In Progress'?'selected':'') + '>In Progress</option>'
+        + '<option ' + (status==='Under Review'?'selected':'') + '>Under Review</option>'
+        + '<option ' + (status==='Delivered'?'selected':'') + '>Delivered</option>'
+        + '</select>'
+        + '</div>'
+        + '</div>';
+    });
+    list.innerHTML = html;
+  }).catch(function(err) {
+    console.error('❌ Firestore orders error:', err);
+    list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Failed to load orders: ' + err.message + '</p></div>';
+  });
+}
+
+function updateOrderStatus(docId, newStatus, selectEl) {
+  if (!db) return;
+  db.collection('orders').doc(docId).update({ status: newStatus }).then(function() {
+    showToast('Status updated to "' + newStatus + '"', '✅');
+    var row = selectEl.closest('.admin-order-row');
+    if (row) {
+      var badge = row.querySelector('.ao-status');
+      var cls = {'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered'};
+      if (badge) { badge.className = 'ao-status ' + (cls[newStatus] || 'pending'); badge.textContent = newStatus; }
+    }
+  }).catch(function(e) { showToast('Failed to update status', '❌'); });
+}
 </script>
 <script>
   const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwRtvLwBXRBKT_n7FMrqpF0Hh72v9S4-Z-WaixvtoaQxBFzYfaHXKgblp_1p0VwCAlv/exec';
@@ -2789,20 +2893,7 @@ function normalizeOrderRecord(o, id = '') {
   };
 }
 
-// ── DASHBOARD (openDashboard/closeDashboard in init script block) ──
-
-function switchDashTab(tab, el) {
-  document.querySelectorAll('.dash-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.dash-pane').forEach(p => p.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('dp' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
-  if (tab === 'files') loadDashFiles(auth.currentUser?.uid);
-  if (tab === 'chat') loadUserChat();
-  if (tab === 'admin') loadAdminOrders();
-  if (tab === 'adminchat') loadAdminChatInbox();
-  if (tab === 'expertsadmin') { loadExpertApplications(); loadWorkingExperts(); }
-  if (tab === 'adminfiles') loadAdminFiles();
-}
+// ── DASHBOARD (openDashboard/closeDashboard/switchDashTab/loadAdminOrders in init script block) ──
 
 async function loadDashOrders(uid) {
   if (!firebaseReady || !db) { console.error('loadDashOrders: Firebase not ready'); return; }
@@ -3160,202 +3251,7 @@ async function createTestOrder() {
   }
 }
 
-// ── ADMIN PANEL ──────────────────────────────────
-async function loadAdminOrders() {
-  if (!firebaseReady || !db) {
-    console.error('loadAdminOrders: Firebase not ready');
-    return;
-  }
-  const list   = document.getElementById('adminOrdersList');
-  const filter = document.getElementById('adminFilterStatus')?.value || '';
-  list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading orders...</p>';
-
-  let allDocs = [];
-  
-  try {
-    console.log('🔄 Loading orders from Firestore...');
-    const all = await db.collection('orders').limit(300).get();
-    allDocs = all.docs;
-    console.log('✅ Firestore orders loaded:', allDocs.length);
-  } catch(firestoreErr) {
-    console.error('❌ Firestore error:', firestoreErr.message);
-    
-    try {
-      list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--accent)">⚠️ Firestore failed. Trying Google Sheets...</p>';
-      const response = await fetch(SHEET_URL + '?type=GET_ORDERS');
-      const data = await response.json();
-      if (data && Array.isArray(data)) {
-        const headers = data[0] || [];
-        allDocs = data.slice(1).map(row => {
-          const obj = {};
-          headers.forEach((h, i) => obj[h] = row[i]);
-          return { id: obj.orderId, data: () => obj };
-        });
-        console.log('✅ Google Sheets orders loaded:', allDocs.length);
-      }
-    } catch(sheetErr) {
-      console.error('Google Sheets also failed:', sheetErr);
-      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:var(--danger)">❌ Failed to load orders from both Firestore and Sheets.</p><p style="color:var(--muted);font-size:.82rem;margin-top:8px">' + firestoreErr.message + '</p></div>';
-      return;
-    }
-  }
-
-  let docs = allDocs;
-  if (filter) docs = docs.filter(d => (d.data().status || 'Pending') === filter);
-  docs = docs.sort((a, b) => {
-    const at = a.data().timestamp?.seconds || 0;
-    const bt = b.data().timestamp?.seconds || 0;
-    return bt - at;
-  });
-
-  if (docs.length === 0) {
-    list.innerHTML = `<div style="padding:20px;text-align:center">
-      <p style="color:var(--muted);font-size:1rem">No orders found.</p>
-      <p style="color:var(--muted);font-size:.85rem;margin-top:8px">Orders will appear here once placed through the website.</p>
-      <button onclick="createTestOrder()" style="background:var(--primary);color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:.9rem;cursor:pointer;margin-top:16px">🧪 Create Test Order</button>
-      <p style="color:var(--danger);font-size:.82rem;margin-top:12px">If orders should exist, check:</p>
-      <ul style="text-align:left;font-size:.82rem;color:var(--muted);margin-top:8px;list-style:disc;padding-left:20px">
-        <li>Firestore rules allow reading 'orders' collection</li>
-        <li>Orders are actually being saved (check browser console)</li>
-        <li>EmailJS is configured correctly</li>
-      </ul>
-    </div>`;
-    return;
-  }
-
-  const statusCls = {
-    'Pending':'pending','Confirmed':'confirmed',
-    'In Progress':'progress','Under Review':'review','Delivered':'delivered'
-  };
-
-  list.innerHTML = `<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Showing ${docs.length} orders</p>` + docs.map(doc => {
-    const o   = normalizeOrderRecord(doc.data(), doc.id);
-    const ts  = o.timestamp?.seconds
-      ? new Date(o.timestamp.seconds * 1000).toLocaleDateString('en-IN', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })
-      : (o.timestamp || '—');
-    const cls = statusCls[o.status] || 'pending';
-    const amount = o.amountPaid || o.amount_paid || '—';
-    const refNo = o.refNo || o.transactionId || '—';
-    const fileLink = o.fileLink || '';
-    const phone = o.phone || '—';
-    const email = o.email || '—';
-    const university = o.university || 'Not specified';
-    const deadline = o.deadline || 'Flexible';
-    const requirements = o.requirements || 'No details provided';
-    const assignedExpert = o.assignedExpertName || 'Not Assigned';
-    const progress = o.progress || 'Not Assigned';
-    const adminMsg = o.adminMessage || '';
-    
-    return `<div class="admin-order-row" style="margin-bottom:20px;border:1.5px solid var(--border);border-radius:16px;padding:20px;background:#fff;box-shadow:0 2px 12px rgba(0,0,0,0.06)">
-      <!-- Header -->
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-size:1.1rem;font-weight:800;color:var(--dark)">${o.name || 'Unknown Customer'}</div>
-          <div style="font-size:.82rem;color:var(--muted);margin-top:2px">📋 ${o.orderId || doc.id}</div>
-          <div style="font-size:.78rem;color:var(--secondary);margin-top:2px">🗓 ${ts}</div>
-        </div>
-        <span class="ao-status ${cls}" style="padding:6px 16px;font-size:.9rem;font-weight:700;border-radius:50px">${o.status || 'Pending'}</span>
-      </div>
-      
-      <!-- Customer Details Grid -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">
-        <div style="background:#f8fafc;padding:12px;border-radius:12px">
-          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📧 Email</div>
-          <div style="font-size:.88rem;font-weight:600;color:var(--dark);word-break:break-all">${email}</div>
-        </div>
-        <div style="background:#f8fafc;padding:12px;border-radius:12px">
-          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📱 Phone / WhatsApp</div>
-          <div style="font-size:.88rem;font-weight:600;color:var(--dark)">${phone}</div>
-          ${phone !== '—' ? `<a href="https://wa.me/91${phone.replace(/\D/g,'')}" target="_blank" style="display:inline-block;margin-top:6px;background:#25D366;color:#fff;padding:4px 12px;border-radius:50px;font-size:.75rem;font-weight:700;text-decoration:none">💬 WhatsApp</a>` : ''}
-        </div>
-        <div style="background:#f8fafc;padding:12px;border-radius:12px">
-          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">🏫 University / Institution</div>
-          <div style="font-size:.88rem;font-weight:600;color:var(--dark)">${university}</div>
-        </div>
-        <div style="background:#f8fafc;padding:12px;border-radius:12px">
-          <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">📆 Deadline</div>
-          <div style="font-size:.88rem;font-weight:600;color:var(--dark)">${deadline}</div>
-        </div>
-      </div>
-      
-      <!-- Service & Amount -->
-      <div style="background:linear-gradient(135deg,#4f46e5,#0891b2);color:#fff;padding:16px;border-radius:12px;margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-          <div>
-            <div style="font-size:.7rem;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.5px">📚 Service / Assistance Needed</div>
-            <div style="font-size:1rem;font-weight:800;margin-top:4px">${o.service || 'Not specified'}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-size:.7rem;font-weight:600;opacity:.8;text-transform:uppercase;letter-spacing:.5px">💰 Amount Paid</div>
-            <div style="font-size:1.4rem;font-weight:900;margin-top:4px">₹${amount}</div>
-            <div style="font-size:.75rem;opacity:.8;margin-top:2px">UTR: ${refNo}</div>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Requirements -->
-      <div style="margin-bottom:16px">
-        <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📝 Requirements / Details</div>
-        <div style="background:#fef3c7;padding:14px;border-radius:10px;font-size:.88rem;color:#92400e;line-height:1.6">${requirements}</div>
-      </div>
-      
-      <!-- File Section -->
-      <div style="margin-bottom:16px">
-        <div style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📎 Files</div>
-        ${fileLink ? `
-          <a href="${fileLink}" target="_blank" style="display:inline-flex;align-items:center;gap:8px;background:var(--primary);color:#fff;padding:10px 20px;border-radius:10px;font-size:.85rem;font-weight:700;text-decoration:none">
-            📎 Open Uploaded File ↗
-          </a>
-        ` : `
-          <div style="background:#f1f5f9;padding:12px;border-radius:10px;color:var(--muted);font-size:.85rem;text-align:center">
-            No file uploaded
-          </div>
-        `}
-      </div>
-      
-      <!-- Expert Assignment & Progress -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
-        <div>
-          <label style="font-size:.76rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">👩‍🏫 Assign to Expert</label>
-          <select class="admin-status-select" data-order-id="${doc.id}" onchange="assignOrderToExpert('${doc.id}', this.value)" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem">
-            <option value="">-- Select Expert --</option>
-          </select>
-          ${assignedExpert !== 'Not Assigned' ? `<div style="margin-top:6px;font-size:.78rem;color:var(--success);font-weight:600">✅ Assigned: ${assignedExpert}</div>` : ''}
-        </div>
-        <div>
-          <label style="font-size:.76rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">📌 Work Progress</label>
-          <select class="admin-status-select" onchange="updateOrderProgress('${doc.id}', this.value)" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem">
-            ${['Not Assigned','Assigned','In Progress','Draft Ready','Under Review','Delivered','Cancelled'].map(p => `<option value="${p}" ${progress===p?'selected':''}>${p}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      
-      <!-- Admin Message -->
-      <div style="margin-bottom:16px">
-        <label style="font-size:.76rem;font-weight:700;color:var(--muted);display:block;margin-bottom:6px">💬 Admin Message / Notes</label>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="msg-${doc.id}" placeholder="Add a note for this order..." value="${adminMsg}" style="flex:1;padding:10px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem" />
-          <button onclick="saveOrderMessage('${doc.id}')" style="background:var(--success);color:#fff;border:none;padding:10px 20px;border-radius:10px;font-size:.85rem;font-weight:700;cursor:pointer;white-space:nowrap">Save</button>
-        </div>
-      </div>
-      
-      <!-- Status Update -->
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding-top:12px;border-top:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <label style="font-size:.78rem;font-weight:700;color:var(--muted)">Order Status:</label>
-          <select class="admin-status-select" onchange="updateOrderStatus('${doc.id}', this.value, this)" style="padding:8px 14px;border:1.5px solid var(--border);border-radius:10px;font-size:.85rem;font-weight:600">
-            ${['Pending','Confirmed','In Progress','Under Review','Delivered'].map(s =>
-              `<option value="${s}" ${(o.status||'Pending')===s?'selected':''}>${s}</option>`
-            ).join('')}
-          </select>
-        </div>
-        <button onclick="cancelAssignment('${doc.id}')" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca;padding:8px 16px;border-radius:10px;font-size:.8rem;font-weight:600;cursor:pointer">❌ Cancel Order</button>
-      </div>
-    </div>`;
-  }).join('');
-
-  await hydrateQualifiedExpertsDropdowns();
-}
+// ── ADMIN PANEL (loadAdminOrders/updateOrderStatus defined in init script block) ──
 
 async function loadExpertProfile(email) {
   const expertTab = document.getElementById('expertTab');
@@ -3920,20 +3816,6 @@ async function recalculateExpertRating(expertId) {
   });
 }
 
-async function updateOrderStatus(docId, newStatus, selectEl) {
-  try {
-    await db.collection('orders').doc(docId).update({ status: newStatus });
-    showToast(`Status updated to "${newStatus}"`, '✅');
-    // refresh colours
-    const row = selectEl.closest('.admin-order-row');
-    const badge = row.querySelector('.ao-status');
-    const cls = { 'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered' };
-    badge.className = 'ao-status ' + (cls[newStatus] || 'pending');
-    badge.textContent = newStatus;
-  } catch(e) {
-    showToast('Failed to update status', '❌');
-  }
-}
 </script>
 <!-- ══════════════════════════════════════
      AUTH MODAL
