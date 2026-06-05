@@ -2986,6 +2986,35 @@ async function adminReplyChat(uid, userEmail) {
   }
 }
 
+// ── TEST ORDER ──────────────────────────────────
+async function createTestOrder() {
+  const testId = 'TEST-' + Date.now();
+  try {
+    await db.collection('orders').doc(testId).set({
+      type: 'ORDER',
+      orderId: testId,
+      name: 'Test Customer',
+      email: 'test@example.com',
+      phone: '9018620566',
+      service: 'Similarity Check Assistance',
+      subject: 'Test Subject',
+      university: 'Test University',
+      deadline: '2025-06-15',
+      requirements: 'This is a test order to verify admin panel works.',
+      fileLink: '',
+      refNo: '123456789012',
+      amountPaid: '50',
+      status: 'Pending',
+      uid: '',
+      timestamp: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast('Test order created! Refreshing...', '✅');
+    setTimeout(() => loadAdminOrders(), 1000);
+  } catch(e) {
+    showToast('Failed to create test order: ' + e.message, '❌');
+  }
+}
+
 // ── ADMIN PANEL ──────────────────────────────────
 async function loadAdminOrders() {
   const list   = document.getElementById('adminOrdersList');
@@ -3045,6 +3074,7 @@ async function loadAdminOrders() {
     list.innerHTML = `<div style="padding:20px;text-align:center">
       <p style="color:var(--muted);font-size:1rem">No orders found.</p>
       <p style="color:var(--muted);font-size:.85rem;margin-top:8px">Orders will appear here once placed through the website.</p>
+      <button onclick="createTestOrder()" style="background:var(--primary);color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:.9rem;cursor:pointer;margin-top:16px">🧪 Create Test Order</button>
       <p style="color:var(--danger);font-size:.82rem;margin-top:12px">If orders should exist, check:</p>
       <ul style="text-align:left;font-size:.82rem;color:var(--muted);margin-top:8px;list-style:disc;padding-left:20px">
         <li>Firestore rules allow reading 'orders' collection</li>
