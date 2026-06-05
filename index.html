@@ -2801,15 +2801,56 @@ async function loadDashOrders(uid) {
   loadingEl.style.display = 'block';
   listEl.innerHTML = ''; emptyEl.style.display = 'none';
 
+  let snap = null;
+  
   try {
-    const snap = await db.collection('orders')
-      .where('uid', '==', uid)
-      .orderBy('timestamp', 'desc')
-      .limit(20)
-      .get();
+    console.log('Loading orders for uid:', uid);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Orders loading timeout (10s)')), 10000)
+    );
+    const firestorePromise = db.collection('orders').where('uid', '==', uid).limit(20).get();
+    snap = await Promise.race([firestorePromise, timeoutPromise]);
+    console.log('Orders loaded from Firestore:', snap.size);
+  } catch(e) {
+    console.error('Firestore orders error:', e.message);
+    loadingEl.textContent = '⚠️ Could not load from Firestore. Trying Google Sheets...';
+    try {
+      const resp = await fetch(SHEET_URL + '?type=GET_ORDERS');
+      const data = await resp.json();
+      if (data && Array.isArray(data) && data.length > 1) {
+        const headers = data[0];
+        const userOrders = data.slice(1).filter(row => {
+          const emailIdx = headers.indexOf('email');
+          const uidIdx = headers.indexOf('uid');
+          return (emailIdx >= 0 && row[emailIdx] === auth.currentUser?.email) ||
+                 (uidIdx >= 0 && row[uidIdx] === uid);
+        });
+        if (userOrders.length > 0) {
+          snap = { 
+            empty: false, 
+            size: userOrders.length,
+            forEach: function(cb) { 
+              userOrders.forEach((row, i) => {
+                const obj = {};
+                headers.forEach((h, j) => obj[h] = row[j]);
+                cb({ id: obj.orderId || ('sheet-' + i), data: () => obj });
+              });
+            })
+          };
+        }
+      }
+    } catch(sheetErr) {
+      console.error('Sheets also failed:', sheetErr);
+    }
+  }
 
-    loadingEl.style.display = 'none';
-    if (snap.empty) { emptyEl.style.display = 'block'; return; }
+  if (!snap || snap.empty) { 
+    loadingEl.style.display = 'none'; 
+    emptyEl.style.display = 'block'; 
+    return; 
+  }
+  
+  loadingEl.style.display = 'none';
 
     snap.forEach(doc => {
       const o = normalizeOrderRecord(doc.data(), doc.id);
@@ -2865,20 +2906,27 @@ async function loadDashFiles(uid) {
   loadingEl.style.display = 'block';
   listEl.innerHTML = ''; emptyEl.style.display = 'none';
 
+  let snap = null;
+  
   try {
-    const snap = await db.collection('orders')
-      .where('uid', '==', uid)
-      .limit(200)
-      .get();
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Files loading timeout')), 8000)
+    );
+    const firestorePromise = db.collection('orders').where('uid', '==', uid).limit(200).get();
+    snap = await Promise.race([firestorePromise, timeoutPromise]);
+  } catch(e) {
+    console.error('loadDashFiles error:', e.message);
+    loadingEl.textContent = '⚠️ Could not load files. Please try again.';
+    return;
+  }
 
-    loadingEl.style.display = 'none';
-    if (snap.empty) { emptyEl.style.display = 'block'; return; }
+  if (!snap || snap.empty) { emptyEl.style.display = 'block'; loadingEl.style.display = 'none'; return; }
 
-    const docs = snap.docs
-      .map(d => normalizeOrderRecord(d.data(), d.id))
-      .filter(o => !!o.fileLink)
-      .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0))
-      .slice(0, 20);
+  const docs = snap.docs
+    .map(d => normalizeOrderRecord(d.data(), d.id))
+    .filter(o => !!o.fileLink)
+    .sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0))
+    .slice(0, 20);
 
     if (!docs.length) { emptyEl.style.display = 'block'; return; }
 
