@@ -2488,8 +2488,14 @@ auth.onAuthStateChanged(user => {
     const adminFilesTab = document.getElementById('adminFilesTab');
     if (adminFilesTab) adminFilesTab.style.display = isAdmin ? 'flex' : 'none';
 
-    // Fetch profile non-blocking (don't await in listener)
-    db.collection('users').doc(user.uid).get().then(snap => {
+    // Fetch profile non-blocking (don't await in listener) - with timeout
+    const profileTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Profile fetch timeout')), 8000)
+    );
+    Promise.race([
+      db.collection('users').doc(user.uid).get(),
+      profileTimeout
+    ]).then(snap => {
       const prof = snap.exists ? snap.data() : {};
       autoFillForms(user, prof);
     }).catch(e => console.error('Profile fetch failed:', e.message));
@@ -2557,14 +2563,25 @@ async function doLogin() {
   
   const btn = document.querySelector('#paneLogin .auth-submit');
   if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
-  
+
+  // Safety timeout for Firebase auth call
+  const loginTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Login timeout - Firebase may be slow or unavailable')), 15000)
+  );
+
   try {
-    await auth.signInWithEmailAndPassword(email, pass);
+    await Promise.race([
+      auth.signInWithEmailAndPassword(email, pass),
+      loginTimeout
+    ]);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
   } catch(e) {
     console.error('Login error:', e.code, e.message);
-    showAuthErr('login', friendlyAuthError(e.code) + ' (code: ' + e.code + ')');
+    const errMsg = e.message?.includes('timeout')
+      ? 'Login timed out. Check your internet connection and try again.'
+      : friendlyAuthError(e.code) + ' (code: ' + e.code + ')';
+    showAuthErr('login', errMsg);
     if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
   }
 }
@@ -2616,41 +2633,81 @@ async function doSignup() {
   
   const btn = document.querySelector('#paneSignup .auth-submit');
   if (btn) { btn.textContent = '⏳ Creating account...'; btn.disabled = true; }
-  
+
+  const signupTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Signup timeout')), 15000)
+  );
+
   try {
-    const cred = await auth.createUserWithEmailAndPassword(email, pass);
-    await cred.user.updateProfile({ displayName: name });
-    await db.collection('users').doc(cred.user.uid).set({
-      name, email, phone, college,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    const cred = await Promise.race([
+      auth.createUserWithEmailAndPassword(email, pass),
+      signupTimeout
+    ]);
+    const profileTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Profile update timeout')), 8000)
+    );
+    await Promise.race([
+      cred.user.updateProfile({ displayName: name }),
+      profileTimeout
+    ]);
+    const dbTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Database save timeout')), 8000)
+    );
+    await Promise.race([
+      db.collection('users').doc(cred.user.uid).set({
+        name, email, phone, college,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }),
+      dbTimeout
+    ]);
     closeAuthModal();
     showToast(`Account created! Welcome, ${name.split(' ')[0]} 🎉`, '✅', 4000);
   } catch(e) {
-    showAuthErr('signup', friendlyAuthError(e.code));
+    const errMsg = e.message?.includes('timeout')
+      ? 'Signup timed out. Please try again.'
+      : friendlyAuthError(e.code);
+    showAuthErr('signup', errMsg);
     if (btn) { btn.textContent = 'Create My Account'; btn.disabled = false; }
   }
 }
 
 async function doGoogleSignIn() {
   const provider = new firebase.auth.GoogleAuthProvider();
+  const googleTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Google sign-in timeout')), 15000)
+  );
+
   try {
-    const cred = await auth.signInWithPopup(provider);
+    const cred = await Promise.race([
+      auth.signInWithPopup(provider),
+      googleTimeout
+    ]);
     const user = cred.user;
-    // Save profile if new user
-    const snap = await db.collection('users').doc(user.uid).get();
+    const dbTimeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Database timeout')), 8000)
+    );
+    const snap = await Promise.race([
+      db.collection('users').doc(user.uid).get(),
+      dbTimeout
+    ]);
     if (!snap.exists) {
-      await db.collection('users').doc(user.uid).set({
-        name:  user.displayName || '',
-        email: user.email || '',
-        phone: '', college: '',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      await Promise.race([
+        db.collection('users').doc(user.uid).set({
+          name:  user.displayName || '',
+          email: user.email || '',
+          phone: '', college: '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        }),
+        dbTimeout
+      ]);
     }
     closeAuthModal();
     showToast(`Welcome, ${(user.displayName||'').split(' ')[0] || 'Scholar'}! 👋`, '✅');
   } catch(e) {
-    showAuthErr('login', friendlyAuthError(e.code));
+    const errMsg = e.message?.includes('timeout')
+      ? 'Google sign-in timed out. Please try again.'
+      : friendlyAuthError(e.code);
+    showAuthErr('login', errMsg);
   }
 }
 
@@ -2804,8 +2861,14 @@ function openDashboard() {
   document.getElementById('pName').textContent    = name;
   document.getElementById('pEmail').textContent   = user.email;
 
-  // Load profile in background (non-blocking)
-  db.collection('users').doc(user.uid).get().then(snap => {
+  // Load profile in background (non-blocking) - with timeout
+  const dashProfileTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Dashboard profile timeout')), 8000)
+  );
+  Promise.race([
+    db.collection('users').doc(user.uid).get(),
+    dashProfileTimeout
+  ]).then(snap => {
     const prof = snap.exists ? snap.data() : {};
     document.getElementById('pPhone').textContent   = prof.phone   || 'Not set';
     document.getElementById('pCollege').textContent = prof.college || 'Not set';
@@ -2895,6 +2958,7 @@ async function loadDashOrders(uid) {
   
   loadingEl.style.display = 'none';
 
+  try {
     snap.forEach(doc => {
       const o = normalizeOrderRecord(doc.data(), doc.id);
       const statusClass = {
@@ -3724,9 +3788,19 @@ async function expertLogin() {
   const pass = document.getElementById('expertLoginPassword')?.value || '';
   if (!email || !pass) return showToast('Enter expert email and password.', '❌');
 
+  const expertTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Expert login timeout')), 15000)
+  );
+  const dbTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Database timeout')), 8000)
+  );
+
   try {
-    await auth.signInWithEmailAndPassword(email, pass);
-    const snap = await db.collection('expertApplications').where('email', '==', email).limit(10).get();
+    await Promise.race([auth.signInWithEmailAndPassword(email, pass), expertTimeout]);
+    const snap = await Promise.race([
+      db.collection('expertApplications').where('email', '==', email).limit(10).get(),
+      dbTimeout
+    ]);
     const docs = snap.docs.map(d => normalizeExpertRecord(d.data(), d.id));
     const expert = docs.find(d => d.status === 'Qualified');
     if (!expert) {
@@ -3739,11 +3813,11 @@ async function expertLogin() {
     document.getElementById('expertWorkspace').style.display = 'block';
     document.getElementById('expName').textContent = expert.fullName || 'Expert';
     document.getElementById('expStatus').textContent = expert.status || 'Qualified';
-    await loadExpertAssignments();
-    await loadExpertHistory();
-    await loadExpertPaymentHistory();
+    loadExpertAssignments();
+    loadExpertHistory();
+    loadExpertPaymentHistory();
   } catch (e) {
-    showToast('Expert login failed.', '❌');
+    showToast(e.message?.includes('timeout') ? 'Expert login timed out.' : 'Expert login failed.', '❌');
   }
 }
 
@@ -3873,7 +3947,11 @@ async function loadPublicExperts() {
   const grid = document.getElementById('publicTeamGrid');
   if (!grid) return;
   try {
-    const snap = await db.collection('expertApplications').limit(500).get();
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Experts loading timeout')), 8000)
+    );
+    const firestorePromise = db.collection('expertApplications').limit(500).get();
+    const snap = await Promise.race([firestorePromise, timeoutPromise]);
     const experts = snap.docs
       .map(d => normalizeExpertRecord(d.data(), d.id))
       .filter(e => (e.status || '') === 'Qualified')
