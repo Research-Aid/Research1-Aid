@@ -1998,14 +1998,68 @@
     window.open('https://wa.me/919018620566?text=' + msg, '_blank');
   }
 
-  // ── ADMIN EMAIL NOTIFICATION ──
-  // ⚠️ Create a new EmailJS template with these variables:
-  //    {{order_id}}, {{client_name}}, {{client_email}}, {{client_phone}},
-  //    {{service}}, {{amount_paid}}, {{ref_no}}, {{deadline}},
-  //    {{university}}, {{requirements}}, {{file_link}}
-  //    Set the "To Email" in the template to: najarzain5@gmail.com
+  // ── EMAIL NOTIFICATIONS ──
+  // ⚠️ Create EmailJS templates in your EmailJS account:
+  // ADMIN: Variables: order_id, client_name, client_email, client_phone, service, amount_paid, ref_no, deadline, university, requirements, file_link
+  // CLIENT: Variables: to_name, to_email, order_id, service, amount_paid
   const ADMIN_TEMPLATE_ID = 'template_oh8jcxn';
+  const CLIENT_TEMPLATE_ID = 'template_zp83lus';
 
+  async function sendOrderEmails(order) {
+    const results = { admin: false, client: false };
+    
+    // Send to admin first
+    try {
+      const adminResult = await emailjs.send('service_xgx967g', ADMIN_TEMPLATE_ID, {
+        order_id:     order.orderId,
+        client_name:  order.name,
+        client_email: order.email,
+        client_phone: order.phone,
+        service:      order.service,
+        amount_paid:  order.amountPaid,
+        ref_no:       order.refNo,
+        deadline:     order.deadline,
+        university:   order.university  || '—',
+        requirements: order.requirements || '—',
+        file_link:    order.fileLink    || 'None',
+        timestamp:    new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+      });
+      results.admin = true;
+      console.log('Admin email sent:', adminResult);
+    } catch (adminErr) {
+      console.error('Admin email failed:', adminErr);
+    }
+
+    // Send to client
+    try {
+      const clientResult = await emailjs.send('service_xgx967g', CLIENT_TEMPLATE_ID, {
+        to_name:     order.name,
+        to_email:    order.email,
+        order_id:    order.orderId,
+        service:     order.service,
+        amount_paid: order.amountPaid
+      });
+      results.client = true;
+      console.log('Client email sent:', clientResult);
+    } catch (clientErr) {
+      console.error('Client email failed:', clientErr);
+    }
+
+    // Show notification
+    if (results.admin && results.client) {
+      showToast('📧 Confirmation emails sent to you and admin!', '✅', 5000);
+    } else if (results.admin) {
+      showToast('📧 Admin notified. Check spam for your confirmation.', '📧', 5000);
+    } else if (results.client) {
+      showToast('📧 Your confirmation sent. Admin will be notified.', '✅', 5000);
+    } else {
+      showToast('Order placed! Check WhatsApp for confirmation.', '⚠️', 6000);
+    }
+    
+    return results;
+  }
+
+  // Legacy function for compatibility
   function sendAdminNotification(order) {
     emailjs.send('service_xgx967g', ADMIN_TEMPLATE_ID, {
       order_id:     order.orderId,
@@ -2019,7 +2073,7 @@
       university:   order.university  || '—',
       requirements: order.requirements || '—',
       file_link:    order.fileLink    || 'None'
-    }).catch(() => {});
+    }).then(() => console.log('Admin email sent')).catch(e => console.error('Admin email failed:', e));
   }
 
   // ── ORDER FORM ──
@@ -2045,7 +2099,7 @@
       }
     }
 
-    btn.textContent = '⏳ Placing order...';
+    btn.textContent = '📧 Sending notifications...';
 
     const payload = {
       type:        'ORDER',
@@ -2063,37 +2117,31 @@
       amountPaid:  document.getElementById('amountPaid').value
     };
 
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) })
-      .then(r => r.json())
-      .catch(() => {})
-      .finally(() => {
-        // Save to Firestore
-        const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
-        if (typeof db !== 'undefined') {
-          db.collection('orders').doc(orderId).set({
-            ...payload, uid: uid || '', status: 'Pending',
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-          }).catch(() => {});
-        }
-        // Email to client
-        emailjs.send('service_xgx967g', 'template_zp83lus', {
-          to_name:     name,
-          to_email:    payload.email,
-          order_id:    orderId,
-          service:     payload.service,
-          amount_paid: payload.amountPaid
-        }).catch(() => {});
-        // Email to admin
-        sendAdminNotification(payload);
-        // Show confirmation modal
-        showConfirmModal(payload);
-        e.target.reset();
-        _mainSelectedFile = null;
-        document.getElementById('mainFileStatus').style.display = 'none';
-        document.getElementById('mainFileUploadBox').style.borderColor = 'var(--border)';
-        btn.textContent = '🚀 Submit Order';
-        btn.disabled = false;
-      });
+    // Send to Google Sheets and Firestore in parallel
+    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+    
+    const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
+    if (typeof db !== 'undefined') {
+      db.collection('orders').doc(orderId).set({
+        ...payload, uid: uid || '', status: 'Pending',
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(() => {});
+    }
+
+    // Send emails IMMEDIATELY - both client and admin
+    btn.textContent = '📧 Sending emails...';
+    await sendOrderEmails(payload);
+
+    btn.textContent = '✅ Finalizing...';
+    
+    // Show confirmation modal
+    showConfirmModal(payload);
+    e.target.reset();
+    _mainSelectedFile = null;
+    document.getElementById('mainFileStatus').style.display = 'none';
+    document.getElementById('mainFileUploadBox').style.borderColor = 'var(--border)';
+    btn.textContent = '🚀 Submit Order';
+    btn.disabled = false;
   }
 
   // ── FEEDBACK ──
@@ -2605,7 +2653,7 @@
       }
     }
 
-    btn.textContent = '⏳ Placing order...';
+    btn.textContent = '📧 Sending notifications...';
 
     const payload = {
       type:         'ORDER',
@@ -2623,35 +2671,36 @@
       amountPaid:   document.getElementById('svcAmtPaid').value.trim()
     };
 
-    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) })
-      .catch(() => {})
-      .finally(() => {
-        const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
-        if (typeof db !== 'undefined') {
-          db.collection('orders').doc(orderId).set({
-            ...payload, uid: uid || '', status: 'Pending',
-            timestamp: firebase.firestore.FieldValue.serverTimestamp()
-          }).catch(() => {});
-        }
-        emailjs.send('service_xgx967g', 'template_zp83lus', {
-          to_name:     name,
-          to_email:    payload.email,
-          order_id:    orderId,
-          service:     _svcService,
-          amount_paid: payload.amountPaid
-        }).catch(() => {});
-        sendAdminNotification(payload);
-        closeServiceModal();
-        showConfirmModal(payload);
-        document.getElementById('svcStep1Form').reset();
-        document.getElementById('svcUtr').value = '';
-        document.getElementById('svcAmtPaid').value = '';
-        _svcSelectedFile = null;
-        document.getElementById('svcFileStatus').style.display = 'none';
-        document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
-        btn.textContent = '🚀 Place Order';
-        btn.disabled = false;
-      });
+    // Send data to Google Sheets and Firestore in parallel with emails
+    fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(() => {});
+    
+    const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
+    if (typeof db !== 'undefined') {
+      db.collection('orders').doc(orderId).set({
+        ...payload, uid: uid || '', status: 'Pending',
+        timestamp: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(() => {});
+    }
+
+    // Send emails IMMEDIATELY - both client and admin
+    btn.textContent = '📧 Sending emails...';
+    const emailResults = await sendOrderEmails(payload);
+
+    btn.textContent = '✅ Finalizing...';
+    
+    // Show confirmation
+    closeServiceModal();
+    showConfirmModal(payload);
+    
+    // Reset form
+    document.getElementById('svcStep1Form').reset();
+    document.getElementById('svcUtr').value = '';
+    document.getElementById('svcAmtPaid').value = '';
+    _svcSelectedFile = null;
+    document.getElementById('svcFileStatus').style.display = 'none';
+    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
+    btn.textContent = '🚀 Place Order';
+    btn.disabled = false;
   }
 
   // ── SCROLL ANIMATIONS ──
