@@ -2078,6 +2078,215 @@
     }).then(() => console.log('Admin email sent')).catch(e => console.error('Admin email failed:', e));
   }
 
+  // ── SERVICE MODAL (Get Assistance) ──
+  let _svcSelectedFile = null;
+
+  function svcFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { showToast('File too large. Max 20MB.','❌'); input.value=''; return; }
+    _svcSelectedFile = file;
+    const box = document.getElementById('svcFileStatus');
+    box.style.display = 'block';
+    box.textContent = '📎 ' + file.name + ' (' + (file.size/1024/1024).toFixed(2) + ' MB) — ready to upload';
+    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--success)';
+  }
+
+  function svcHandleDrop(e) {
+    e.preventDefault();
+    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
+    const file = e.dataTransfer.files[0];
+    if (file) { _svcSelectedFile = file; svcFileSelected({ files: [file] }); }
+  }
+
+  let _svcService = '', _svcPrice = '', _svcMin = 0, _svcEmoji = '📚';
+
+  function openServiceModal(service, price, minAmount, emoji) {
+    _svcService = service;
+    _svcPrice   = price;
+    _svcMin     = parseFloat(minAmount) || 0;
+    _svcEmoji   = emoji || '📚';
+    document.getElementById('svcModalTitle').textContent = _svcEmoji + ' ' + service;
+    document.getElementById('svcPriceDisplay').textContent = price;
+    document.getElementById('svcPriceStep2').textContent = price;
+    document.getElementById('svcServiceLabel').textContent = service;
+    document.getElementById('svcServiceEmoji').textContent = _svcEmoji;
+    document.getElementById('svcStep1Form').reset();
+    document.getElementById('svcUtr').value = '';
+    document.getElementById('svcAmtPaid').value = '';
+    _svcSelectedFile = null;
+    document.getElementById('svcFileStatus').style.display = 'none';
+    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
+    svcGoStep(1);
+    document.getElementById('serviceModal').classList.add('open');
+    console.log('✅ Service modal opened:', service);
+  }
+
+  function closeServiceModal() {
+    document.getElementById('serviceModal').classList.remove('open');
+  }
+
+  function svcGoStep(n) {
+    [1,2,3].forEach(i => {
+      document.getElementById('svcStep'+i).style.display = (i === n) ? 'block' : 'none';
+    });
+    if (n === 2) {
+      document.getElementById('svcPriceStep2').textContent = _svcPrice;
+    }
+    setTimeout(() => {
+      if (n === 1) document.getElementById('svcName')?.focus();
+      if (n === 2) document.getElementById('svcUtr')?.focus();
+      if (n === 3) document.getElementById('svcSubmitBtn')?.focus();
+    }, 80);
+    ['dot1','dot2','dot3'].forEach((id, idx) => {
+      const dot = document.getElementById(id);
+      dot.classList.remove('active','done');
+      if (idx + 1 < n)  dot.classList.add('done');
+      if (idx + 1 === n) dot.classList.add('active');
+    });
+    ['line12','line23'].forEach((id, idx) => {
+      const line = document.getElementById(id);
+      line.classList.toggle('done', n > idx + 1);
+    });
+  }
+
+  function svcProceedFromStep1() {
+    const name = document.getElementById('svcName').value.trim();
+    const email = document.getElementById('svcEmail').value.trim();
+    const phone = document.getElementById('svcPhone').value.trim();
+    const req = document.getElementById('svcRequirements').value.trim();
+    if (!name) { showToast('Please enter your full name.', '❌'); return; }
+    if (!email) { showToast('Please enter your email address.', '❌'); return; }
+    if (!phone) { showToast('Please enter your WhatsApp number.', '❌'); return; }
+    if (!req) { showToast('Please describe your requirements.', '❌'); return; }
+    console.log('✅ Step 1 validated, proceeding to Step 2');
+    svcGoStep(2);
+  }
+
+  function svcVerifyUtr() {
+    const utr = document.getElementById('svcUtr').value.trim();
+    const amt = document.getElementById('svcAmtPaid').value.trim();
+    if (!utr) { showToast('Please enter your UTR / Transaction ID.', '❌'); return; }
+    if (!amt || parseFloat(amt) <= 0) { showToast('Please enter the amount you paid.', '❌'); return; }
+    document.getElementById('svcReviewName').textContent = document.getElementById('svcName').value.trim();
+    document.getElementById('svcReviewEmail').textContent = document.getElementById('svcEmail').value.trim();
+    document.getElementById('svcReviewPhone').textContent = document.getElementById('svcPhone').value.trim();
+    document.getElementById('svcReviewSubject').textContent = document.getElementById('svcSubject').value.trim() || '—';
+    document.getElementById('svcReviewReq').textContent = document.getElementById('svcRequirements').value.trim();
+    document.getElementById('svcReviewDeadline').textContent = document.getElementById('svcDeadline').value || 'Flexible';
+    document.getElementById('svcReviewUtr').textContent = utr;
+    document.getElementById('svcReviewAmt').textContent = '₹' + amt;
+    console.log('✅ UTR verified, proceeding to Step 3');
+    svcGoStep(3);
+  }
+
+  async function svcSubmitOrder(e) {
+    e.preventDefault();
+    const btn = document.getElementById('svcSubmitBtn');
+    btn.textContent = '⏳ Submitting...';
+    btn.disabled = true;
+
+    const name    = document.getElementById('svcName').value.trim();
+    const orderId = 'SA-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random()*9000)+1000);
+
+    console.log('📋 Order submission started:', orderId);
+
+    let fileLink = document.getElementById('svcDriveLink').value.trim();
+    if (_svcSelectedFile) {
+      btn.textContent = '☁️ Uploading file...';
+      const driveUrl = await uploadFileToDrive(_svcSelectedFile, orderId, name);
+      if (driveUrl) {
+        fileLink = driveUrl;
+        showToast('File uploaded to Drive!', '☁️', 3000);
+      } else {
+        showToast('File upload failed — order will still be placed.', '⚠️', 3500);
+      }
+    }
+
+    btn.textContent = '📧 Sending notifications...';
+
+    const payload = {
+      type:         'ORDER',
+      orderId,
+      name,
+      email:        document.getElementById('svcEmail').value.trim(),
+      phone:        document.getElementById('svcPhone').value.trim(),
+      service:      _svcService,
+      subject:      document.getElementById('svcSubject').value.trim(),
+      university:   document.getElementById('svcUniversity').value.trim(),
+      deadline:     document.getElementById('svcDeadline').value,
+      requirements: document.getElementById('svcRequirements').value.trim(),
+      fileLink:     fileLink,
+      refNo:        document.getElementById('svcUtr').value.trim(),
+      amountPaid:   document.getElementById('svcAmtPaid').value.trim()
+    };
+
+    try {
+      fetch(SHEET_URL, { method: 'POST', body: JSON.stringify(payload) }).catch(e => console.error('Sheet error:', e));
+    } catch (sheetErr) {
+      console.error('Sheet save failed:', sheetErr);
+    }
+    
+    try {
+      const uid = (typeof auth !== 'undefined' && auth.currentUser) ? auth.currentUser.uid : null;
+      if (typeof db !== 'undefined') {
+        await db.collection('orders').doc(orderId).set({
+          ...payload, uid: uid || '', status: 'Pending',
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log('✅ Order saved to Firestore:', orderId);
+      }
+    } catch (firestoreErr) {
+      console.error('❌ Firestore save failed:', firestoreErr);
+      alert('⚠️ Order saved to Google Sheets but NOT to Firestore.\nCheck Firestore rules.\n\nError: ' + firestoreErr.message);
+    }
+
+    btn.textContent = '📧 Sending emails...';
+    const emailResults = await sendOrderEmails(payload);
+    console.log('📧 Email results:', emailResults);
+
+    btn.textContent = '✅ Finalizing...';
+    
+    closeServiceModal();
+    showConfirmModal(payload);
+    
+    document.getElementById('svcStep1Form').reset();
+    document.getElementById('svcUtr').value = '';
+    document.getElementById('svcAmtPaid').value = '';
+    _svcSelectedFile = null;
+    document.getElementById('svcFileStatus').style.display = 'none';
+    document.getElementById('svcFileUploadBox').style.borderColor = 'var(--border)';
+    btn.textContent = '🚀 Place Order';
+    btn.disabled = false;
+  }
+
+  // ── FILE UPLOAD TO GOOGLE DRIVE ──
+  async function uploadFileToDrive(file, orderId, name) {
+    // This requires Google Drive API setup with your credentials
+    // For now, return empty to skip upload
+    console.log('File upload skipped (Drive API not configured):', file.name);
+    return '';
+  }
+
+  // Main order form file selection
+  let _mainSelectedFile = null;
+  function mainFileSelected(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) { showToast('File too large. Max 20MB.','❌'); input.value=''; return; }
+    _mainSelectedFile = file;
+    const box = document.getElementById('mainFileStatus');
+    box.style.display = 'block';
+    box.textContent = '📎 ' + file.name + ' (' + (file.size/1024/1024).toFixed(2) + ' MB) — ready to upload';
+    document.getElementById('mainFileUploadBox').style.borderColor = 'var(--success)';
+  }
+  function mainHandleDrop(e) {
+    e.preventDefault();
+    document.getElementById('mainFileUploadBox').style.borderColor = 'var(--border)';
+    const file = e.dataTransfer.files[0];
+    if (file) { _mainSelectedFile = file; mainFileSelected({ files: [file] }); }
+  }
+
   // ── ORDER FORM ──
   async function submitOrder(e) {
     e.preventDefault();
