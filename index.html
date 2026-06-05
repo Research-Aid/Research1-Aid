@@ -2563,45 +2563,41 @@
     el.style.transition = 'opacity .55s ease, transform .55s ease';
     observer.observe(el);
   });
+
+  // ── FIREBASE INIT (must be here so auth functions work) ──
+  let auth, db, storage;
+  let firebaseReady = false;
+
+  try {
+    if (typeof firebase === 'undefined') throw new Error('Firebase SDK script did not load');
+    if (!firebase.app) throw new Error('firebase.app not available');
+    
+    const firebaseConfig = {
+      apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
+      authDomain:        "research-aid-ff2eb.firebaseapp.com",
+      projectId:         "research-aid-ff2eb",
+      storageBucket:     "research-aid-ff2eb.firebasestorage.app",
+      messagingSenderId: "301229801288",
+      appId:             "1:301229801288:web:fb148d7942d8e901513d7d",
+      measurementId:     "G-E899JK0CVQ"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    auth    = firebase.auth();
+    db      = firebase.firestore();
+    storage = firebase.storage();
+
+    fbDebug('✅ Firebase init OK. auth=' + typeof auth + ' db=' + typeof db);
+    firebaseReady = true;
+  } catch(e) {
+    fbDebug('❌ Firebase INIT FAILED: ' + e.message);
+    console.error('❌ Firebase init failed:', e);
+    const st = document.getElementById('fbStatus');
+    if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Error: ' + e.message; }
+  }
 </script>
 
 <script>
-/* ══════════════════════════════════════════════════
-   ⚠️  PASTE YOUR FIREBASE CONFIG HERE
-   Go to: console.firebase.google.com
-   → Your Project → Project Settings → Your Apps → Config
-══════════════════════════════════════════════════ */
-let auth, db, storage;
-let firebaseReady = false;
-
-try {
-  if (typeof firebase === 'undefined') throw new Error('Firebase SDK script did not load');
-  if (!firebase.app) throw new Error('firebase.app not available');
-  
-  const firebaseConfig = {
-    apiKey:            "AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI",
-    authDomain:        "research-aid-ff2eb.firebaseapp.com",
-    projectId:         "research-aid-ff2eb",
-    storageBucket:     "research-aid-ff2eb.firebasestorage.app",
-    messagingSenderId: "301229801288",
-    appId:             "1:301229801288:web:fb148d7942d8e901513d7d",
-    measurementId:     "G-E899JK0CVQ"
-  };
-
-  firebase.initializeApp(firebaseConfig);
-  auth    = firebase.auth();
-  db      = firebase.firestore();
-  storage = firebase.storage();
-
-  fbDebug('✅ Firebase init OK. auth=' + typeof auth + ' db=' + typeof db);
-  firebaseReady = true;
-} catch(e) {
-  fbDebug('❌ Firebase INIT FAILED: ' + e.message);
-  console.error('❌ Firebase init failed:', e);
-  const st = document.getElementById('fbStatus');
-  if (st) { st.style.display = 'block'; st.style.background = '#fee2e2'; st.style.color = '#991b1b'; st.textContent = '⚠️ Firebase failed to load. Login will not work. Error: ' + e.message; }
-}
-
 // ── AUTH STATE LISTENER ──────────────────────────
 if (firebaseReady && auth) {
 auth.onAuthStateChanged(user => {
