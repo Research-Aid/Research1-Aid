@@ -1883,6 +1883,12 @@
 <!-- Back to Top -->
 <button class="back-to-top" id="backToTop" onclick="scrollToSection('home')" title="Back to Top">↑</button>
 
+<!-- FIREBASE SDK (must load BEFORE main script) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+
 <script>
   const SHEET_URL = 'https://script.google.com/macros/s/AKfycbwRtvLwBXRBKT_n7FMrqpF0Hh72v9S4-Z-WaixvtoaQxBFzYfaHXKgblp_1p0VwCAlv/exec';
   emailjs.init('ntjRszAyP7FaoFO1A');
@@ -2429,12 +2435,6 @@
     observer.observe(el);
   });
 </script>
-<!-- ══════════════════════════════════════
-     FIREBASE SDK (compat)
-══════════════════════════════════════ -->
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <script>
 /* ══════════════════════════════════════════════════
@@ -3118,8 +3118,6 @@ async function loadAdminOrders() {
   }).join('');
 
   await hydrateQualifiedExpertsDropdowns();
-}
-  }
 }
 
 async function loadExpertProfile(email) {
