@@ -2020,80 +2020,135 @@ function switchDashTab(tab, el) {
 }
 
 function loadAdminOrders() {
-  if (!firebaseReady || !db) { console.error('loadAdminOrders: Firebase not ready'); return; }
   var list = document.getElementById('adminOrdersList');
   var filter = document.getElementById('adminFilterStatus');
   var filterVal = filter ? filter.value : '';
   if (!list) return;
-  list.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b">⏳ Loading orders from Google Sheets...</p>';
+  list.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b">⏳ Loading orders...</p>';
 
   fetch(SHEET_URL + '?type=GET_ORDERS').then(function(r) { return r.json(); }).then(function(data) {
-    if (!data || !Array.isArray(data) || data.length < 2) {
-      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found.</p></div>';
+    var rows = [];
+    var headers = [];
+
+    if (data && Array.isArray(data) && data.length > 1) {
+      headers = data[0] || [];
+      rows = data.slice(1);
+      if (filterVal) rows = rows.filter(function(row) { var si = headers.indexOf('status'); return si >= 0 ? row[si] === filterVal : true; });
+    }
+
+    if (rows.length === 0 && firebaseReady && db) {
+      list.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b">No orders in Sheets. Trying Firestore...</p>';
+      db.collection('orders').limit(300).get().then(function(all) {
+        var docs = all.docs;
+        if (filterVal) docs = docs.filter(function(d) { return (d.data().status || 'Pending') === filterVal; });
+        if (docs.length === 0) {
+          list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found anywhere.</p><p style="color:#64748b;font-size:.85rem;margin-top:8px">Place an order first and it will appear here.</p></div>';
+          return;
+        }
+        renderFirestoreOrders(docs, list);
+      }).catch(function(err) {
+        list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Firestore failed: ' + err.message + '</p><p style="color:#64748b;font-size:.85rem;margin-top:8px">No orders in Sheets either. Place an order first.</p></div>';
+      });
       return;
     }
-    var headers = data[0] || [];
-    var rows = data.slice(1);
-    if (filterVal) rows = rows.filter(function(row) { var si = headers.indexOf('status'); return si >= 0 ? row[si] === filterVal : true; });
 
     if (rows.length === 0) {
-      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found.</p></div>';
+      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found.</p><p style="color:#64748b;font-size:.85rem;margin-top:8px">Place an order first and it will appear here.</p></div>';
       return;
     }
 
-    var statusCls = {'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered'};
-    var html = '<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Showing ' + rows.length + ' orders (from Sheets)</p>';
-    rows.forEach(function(row) {
-      var obj = {}; headers.forEach(function(h, i) { obj[h] = row[i]; });
-      var status = obj.status || 'Pending';
-      var cls = statusCls[status] || 'pending';
-      var phone = obj.phone || '—';
-      var waLink = phone && phone !== '—' ? 'https://wa.me/' + phone.replace(/[^0-9]/g,'') : '#';
-      html += '<div class="admin-order-row">'
-        + '<div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:6px">'
-        + '<span class="ao-id">' + (obj.orderId || '—') + '</span>'
-        + '<span class="ao-status ' + cls + '">' + status + '</span>'
-        + '</div>'
-        + '<div class="ao-name">' + (obj.name || 'Client') + '</div>'
-        + '<div class="ao-svc">' + (obj.service || '—') + '</div>'
-        + '<div class="ao-meta">'
-        + '<span>📧 ' + (obj.email || '—') + '</span>'
-        + '<span>📱 <a href="' + waLink + '" target="_blank" style="color:#0f172a">' + phone + '</a></span>'
-        + '<span>🎓 ' + (obj.university || '—') + '</span>'
-        + '<span>⏰ ' + (obj.deadline || '—') + '</span>'
-        + '</div>'
-        + '<div class="ao-meta" style="margin-top:4px">'
-        + '<span>💰 ₹' + (obj.amountPaid || '0') + '</span>'
-        + '<span>UTR: ' + (obj.refNo || '—') + '</span>'
-        + '</div>'
-        + (obj.requirements ? '<div style="margin-top:6px;font-size:.82rem;color:#1e293b"><strong>Requirements:</strong> ' + obj.requirements + '</div>' : '')
-        + (obj.fileLink ? '<div style="margin-top:4px;font-size:.82rem"><a href="' + obj.fileLink + '" target="_blank" style="color:#4f46e5;font-weight:700">📎 View File</a></div>' : '')
-        + '<div style="margin-top:6px"><select class="admin-status-select" onchange="updateOrderStatusSheet(\'' + (obj.orderId || '') + '\',this.value,this)">'
-        + '<option ' + (status==='Pending'?'selected':'') + '>Pending</option>'
-        + '<option ' + (status==='Confirmed'?'selected':'') + '>Confirmed</option>'
-        + '<option ' + (status==='In Progress'?'selected':'') + '>In Progress</option>'
-        + '<option ' + (status==='Under Review'?'selected':'') + '>Under Review</option>'
-        + '<option ' + (status==='Delivered'?'selected':'') + '>Delivered</option>'
-        + '</select></div>'
-        + '</div>';
-    });
-    list.innerHTML = html;
+    renderSheetOrders(rows, headers, list);
   }).catch(function(err) {
     console.error('❌ Sheets error:', err);
-    list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Failed to load from Google Sheets: ' + err.message + '</p></div>';
+    if (firebaseReady && db) {
+      list.innerHTML = '<p style="text-align:center;padding:20px;color:#64748b">Sheets failed. Trying Firestore...</p>';
+      db.collection('orders').limit(300).get().then(function(all) {
+        var docs = all.docs;
+        if (docs.length === 0) {
+          list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#64748b">No orders found.</p></div>';
+          return;
+        }
+        renderFirestoreOrders(docs, list);
+      }).catch(function(e2) {
+        list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Both sources failed.</p></div>';
+      });
+    } else {
+      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:#ef4444">❌ Failed to load: ' + err.message + '</p></div>';
+    }
   });
 }
 
-function updateOrderStatusSheet(orderId, newStatus, selectEl) {
-  fetch(SHEET_URL, { method: 'POST', body: JSON.stringify({ type: 'UPDATE_STATUS', orderId: orderId, status: newStatus }) }).then(function() {
-    showToast('Status updated to "' + newStatus + '"', '✅');
-    var row = selectEl.closest('.admin-order-row');
-    if (row) {
-      var badge = row.querySelector('.ao-status');
-      var cls = {'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered'};
-      if (badge) { badge.className = 'ao-status ' + (cls[newStatus] || 'pending'); badge.textContent = newStatus; }
-    }
-  }).catch(function() { showToast('Failed to update status', '❌'); });
+function renderSheetOrders(rows, headers, list) {
+  var statusCls = {'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered'};
+  var html = '<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 ' + rows.length + ' orders (from Sheets)</p>';
+  rows.forEach(function(row) {
+    var obj = {}; headers.forEach(function(h, i) { obj[h] = row[i]; });
+    var status = obj.status || 'Pending';
+    var cls = statusCls[status] || 'pending';
+    var phone = obj.phone || '—';
+    var waLink = phone && phone !== '—' ? 'https://wa.me/' + phone.replace(/[^0-9]/g,'') : '#';
+    html += '<div class="admin-order-row">'
+      + '<div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:6px">'
+      + '<span class="ao-id">' + (obj.orderId || '—') + '</span>'
+      + '<span class="ao-status ' + cls + '">' + status + '</span>'
+      + '</div>'
+      + '<div class="ao-name">' + (obj.name || 'Client') + '</div>'
+      + '<div class="ao-svc">' + (obj.service || '—') + '</div>'
+      + '<div class="ao-meta">'
+      + '<span>📧 ' + (obj.email || '—') + '</span>'
+      + '<span>📱 <a href="' + waLink + '" target="_blank" style="color:#0f172a">' + phone + '</a></span>'
+      + '<span>🎓 ' + (obj.university || '—') + '</span>'
+      + '<span>⏰ ' + (obj.deadline || '—') + '</span>'
+      + '</div>'
+      + '<div class="ao-meta" style="margin-top:4px">'
+      + '<span>💰 ₹' + (obj.amountPaid || '0') + '</span>'
+      + '<span>UTR: ' + (obj.refNo || '—') + '</span>'
+      + '</div>'
+      + (obj.requirements ? '<div style="margin-top:6px;font-size:.82rem;color:#1e293b"><strong>Requirements:</strong> ' + obj.requirements + '</div>' : '')
+      + (obj.fileLink ? '<div style="margin-top:4px;font-size:.82rem"><a href="' + obj.fileLink + '" target="_blank" style="color:#4f46e5;font-weight:700">📎 View File</a></div>' : '')
+      + '</div>';
+  });
+  list.innerHTML = html;
+}
+
+function renderFirestoreOrders(docs, list) {
+  var statusCls = {'Pending':'pending','Confirmed':'confirmed','In Progress':'progress','Under Review':'review','Delivered':'delivered'};
+  var html = '<p style="text-align:center;padding:10px;background:#dcfce7;color:#166534;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 ' + docs.length + ' orders (from Firestore)</p>';
+  docs.forEach(function(doc) {
+    var o = doc.data();
+    var status = o.status || 'Pending';
+    var cls = statusCls[status] || 'pending';
+    var phone = o.phone || '—';
+    var waLink = phone && phone !== '—' ? 'https://wa.me/' + phone.replace(/[^0-9]/g,'') : '#';
+    html += '<div class="admin-order-row">'
+      + '<div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:6px">'
+      + '<span class="ao-id">' + (o.orderId || doc.id) + '</span>'
+      + '<span class="ao-status ' + cls + '">' + status + '</span>'
+      + '</div>'
+      + '<div class="ao-name">' + (o.name || 'Client') + '</div>'
+      + '<div class="ao-svc">' + (o.service || '—') + '</div>'
+      + '<div class="ao-meta">'
+      + '<span>📧 ' + (o.email || '—') + '</span>'
+      + '<span>📱 <a href="' + waLink + '" target="_blank" style="color:#0f172a">' + phone + '</a></span>'
+      + '<span>🎓 ' + (o.university || '—') + '</span>'
+      + '<span>⏰ ' + (o.deadline || '—') + '</span>'
+      + '</div>'
+      + '<div class="ao-meta" style="margin-top:4px">'
+      + '<span>💰 ₹' + (o.amountPaid || '0') + '</span>'
+      + '<span>UTR: ' + (o.refNo || '—') + '</span>'
+      + '</div>'
+      + (o.requirements ? '<div style="margin-top:6px;font-size:.82rem;color:#1e293b"><strong>Requirements:</strong> ' + o.requirements + '</div>' : '')
+      + (o.fileLink ? '<div style="margin-top:4px;font-size:.82rem"><a href="' + o.fileLink + '" target="_blank" style="color:#4f46e5;font-weight:700">📎 View File</a></div>' : '')
+      + '<div style="margin-top:6px"><select class="admin-status-select" onchange="updateOrderStatus(\'' + doc.id + '\',this.value,this)">'
+      + '<option ' + (status==='Pending'?'selected':'') + '>Pending</option>'
+      + '<option ' + (status==='Confirmed'?'selected':'') + '>Confirmed</option>'
+      + '<option ' + (status==='In Progress'?'selected':'') + '>In Progress</option>'
+      + '<option ' + (status==='Under Review'?'selected':'') + '>Under Review</option>'
+      + '<option ' + (status==='Delivered'?'selected':'') + '>Delivered</option>'
+      + '</select></div>'
+      + '</div>';
+  });
+  list.innerHTML = html;
 }
 </script>
 <script>
