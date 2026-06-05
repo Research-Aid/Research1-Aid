@@ -2805,6 +2805,7 @@ function switchDashTab(tab, el) {
 }
 
 async function loadDashOrders(uid) {
+  if (!firebaseReady || !db) { console.error('loadDashOrders: Firebase not ready'); return; }
   const listEl    = document.getElementById('ordersList');
   const loadingEl = document.getElementById('ordersLoading');
   const emptyEl   = document.getElementById('ordersEmpty');
@@ -2815,15 +2816,10 @@ async function loadDashOrders(uid) {
   
   try {
     console.log('Loading orders for uid:', uid);
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Orders loading timeout (10s)')), 10000)
-    );
-    const firestorePromise = db.collection('orders').where('uid', '==', uid).limit(20).get();
-    snap = await Promise.race([firestorePromise, timeoutPromise]);
+    snap = await db.collection('orders').where('uid', '==', uid).limit(20).get();
     console.log('Orders loaded from Firestore:', snap.size);
   } catch(e) {
     console.error('Firestore orders error:', e.message);
-    loadingEl.textContent = '⚠️ Could not load from Firestore. Trying Google Sheets...';
     try {
       const resp = await fetch(SHEET_URL + '?type=GET_ORDERS');
       const data = await resp.json();
@@ -3166,27 +3162,26 @@ async function createTestOrder() {
 
 // ── ADMIN PANEL ──────────────────────────────────
 async function loadAdminOrders() {
+  if (!firebaseReady || !db) {
+    console.error('loadAdminOrders: Firebase not ready');
+    return;
+  }
   const list   = document.getElementById('adminOrdersList');
   const filter = document.getElementById('adminFilterStatus')?.value || '';
-  list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading from Firestore...</p>';
+  list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--muted)">⏳ Loading orders...</p>';
 
   let allDocs = [];
   
   try {
     console.log('🔄 Loading orders from Firestore...');
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Firestore timeout after 10s')), 10000)
-    );
-    const firestorePromise = db.collection('orders').limit(300).get();
-    const all = await Promise.race([firestorePromise, timeoutPromise]);
+    const all = await db.collection('orders').limit(300).get();
     allDocs = all.docs;
     console.log('✅ Firestore orders loaded:', allDocs.length);
   } catch(firestoreErr) {
     console.error('❌ Firestore error:', firestoreErr.message);
     
-    // Fallback to Google Sheets
     try {
-      list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--accent)">⚠️ Firestore timeout. Trying Google Sheets...</p>';
+      list.innerHTML = '<p style="text-align:center;padding:20px;color:var(--accent)">⚠️ Firestore failed. Trying Google Sheets...</p>';
       const response = await fetch(SHEET_URL + '?type=GET_ORDERS');
       const data = await response.json();
       if (data && Array.isArray(data)) {
@@ -3197,17 +3192,11 @@ async function loadAdminOrders() {
           return { id: obj.orderId, data: () => obj };
         });
         console.log('✅ Google Sheets orders loaded:', allDocs.length);
-        if (allDocs.length > 0) {
-          list.innerHTML = '<p style="text-align:center;padding:10px;background:#fef3c7;color:#92400e;border-radius:8px;font-size:.82rem;margin-bottom:12px">📊 Loaded from Google Sheets (Firestore was slow)</p>';
-        }
       }
     } catch(sheetErr) {
       console.error('Google Sheets also failed:', sheetErr);
-      list.innerHTML = `<div style="padding:20px;text-align:center">
-        <p style="color:var(--danger);font-size:.9rem">❌ Both data sources failed:</p>
-        <p style="color:var(--muted);font-size:.82rem;margin-top:8px">Firestore: ${firestoreErr.message}</p>
-        <p style="color:var(--muted);font-size:.82rem">Sheets: ${sheetErr.message}</p>
-      </div>`;
+      list.innerHTML = '<div style="padding:20px;text-align:center"><p style="color:var(--danger)">❌ Failed to load orders from both Firestore and Sheets.</p><p style="color:var(--muted);font-size:.82rem;margin-top:8px">' + firestoreErr.message + '</p></div>';
+      return;
     }
   }
 
