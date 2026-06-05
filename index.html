@@ -2594,16 +2594,35 @@ async function doLogin() {
   const btn = document.querySelector('#paneLogin .auth-submit');
   if (btn) { btn.textContent = '⏳ Logging in...'; btn.disabled = true; }
 
+  // Test Firebase Auth API reachability first
+  try {
+    fbDebug('Testing Firebase Auth API reachability...');
+    const testResp = await Promise.race([
+      fetch('https://www.googleapis.com/identitytoolkit/v3/relyingparty/getAccountInfo?key=AIzaSyAa7zpe5ooyMs4_hgzKTdFBTwBycPGcXOI', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({idToken:'test'}) }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Firebase API unreachable (5s timeout)')), 5000))
+    ]);
+    fbDebug('Firebase API responded: status=' + testResp.status);
+  } catch(netErr) {
+    fbDebug('❌ Firebase API UNREACHABLE: ' + netErr.message);
+    showAuthErr('login', 'Cannot reach Firebase servers. Check your internet connection or try a different network. Error: ' + netErr.message);
+    if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
+    return;
+  }
+
   try {
     fbDebug('Calling signInWithEmailAndPassword...');
-    const result = await auth.signInWithEmailAndPassword(email, pass);
+    const loginPromise = auth.signInWithEmailAndPassword(email, pass);
+    const result = await Promise.race([
+      loginPromise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Login timed out after 10s - Firebase servers may be blocked on your network')), 10000))
+    ]);
     fbDebug('✅ Login SUCCESS: ' + result.user.email);
     closeAuthModal();
     showToast('Welcome back! 👋', '✅');
   } catch(e) {
-    fbDebug('❌ Login FAILED: code=' + e.code + ' msg=' + e.message);
+    fbDebug('❌ Login FAILED: code=' + (e.code||'TIMEOUT') + ' msg=' + e.message);
     console.error('Login error:', e.code, e.message);
-    showAuthErr('login', friendlyAuthError(e.code, e.message));
+    showAuthErr('login', e.code ? friendlyAuthError(e.code, e.message) : e.message);
     if (btn) { btn.textContent = 'Login to My Account'; btn.disabled = false; }
   }
 }
